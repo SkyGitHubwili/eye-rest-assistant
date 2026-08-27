@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <UseWindowsForms>true</UseWindowsForms>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AssemblyName>护眼助手</AssemblyName>
+    <RootNamespace>EyeRest</RootNamespace>
+    <ApplicationIcon>assets\brand\eye-rest.ico</ApplicationIcon>
+    <Version>1.2.0</Version>
+    <Product>护眼助手</Product>
+    <Description>定时全屏休息与自定义护眼画面</Description>
+    <Authors>EyeRest</Authors>
+  </PropertyGroup>
+  <ItemGroup>
+    <Resource Include="assets\brand\eye-rest-icon.png" />
+  </ItemGroup>
+</Project>

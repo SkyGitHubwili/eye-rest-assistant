@@ -1,0 +1,13 @@
+bin/
+obj/
+.vs/
+*.user
+mobile/android/build/
+mobile/android/eyerest-debug.keystore
+*.keystore
+*.jks
+*.p12
+*.pem
+local.properties
+.idea/
+*.apk
