@@ -9,7 +9,7 @@
     <AssemblyName>护眼助手</AssemblyName>
     <RootNamespace>EyeRest</RootNamespace>
     <ApplicationIcon>assets\brand\eye-rest.ico</ApplicationIcon>
-    <Version>1.2.0</Version>
+    <Version>1.6.13</Version>
     <Product>护眼助手</Product>
     <Description>定时全屏休息与自定义护眼画面</Description>
     <Authors>EyeRest</Authors>
