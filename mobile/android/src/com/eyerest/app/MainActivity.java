@@ -36,10 +36,12 @@ public class MainActivity extends Activity {
     private static final int RED = Color.rgb(205, 61, 61);
     private static final int INK = Color.rgb(24, 52, 42);
     private SharedPreferences prefs;
-    private TextView countdown, status, imageStatus, overlayStatus, modeStatus, breakDuration;
+    private TextView countdown, status, imageStatus, overlayStatus, modeStatus, breakDuration, sleepStatus;
     private ImageView breakPreview;
     private Button toggle, resetButton, breakNowButton, manualModeButton, autoModeButton, offModeButton;
+    private Button sleepOffButton, sleepTodayButton, sleepDailyButton;
     private Spinner workSpinner, startHourSpinner, endHourSpinner;
+    private Spinner sleepStartHourSpinner, sleepStartMinuteSpinner, sleepWakeHourSpinner, sleepWakeMinuteSpinner;
     private final android.os.Handler handler = new android.os.Handler();
     private final int[] workValues = {0, 20, 25, 30};
     private boolean openPermissionPageAfterStartup;
@@ -88,8 +90,8 @@ public class MainActivity extends Activity {
         header.addView(logo, new LinearLayout.LayoutParams(dp(54), dp(54)));
         LinearLayout titles = column();
         titles.setPadding(dp(12), 0, 0, 0);
-        titles.addView(text("护眼助手", 25, INK, true));
-        titles.addView(text("让眼睛定时离开屏幕", 13, Color.rgb(115,128,121), false));
+        titles.addView(text("护眼与睡眠助手", 25, INK, true));
+        titles.addView(text("定时放松眼睛，也帮助你按时入睡", 13, Color.rgb(115,128,121), false));
         header.addView(titles, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
         status = text("专注中", 12, GREEN, true);
         status.setGravity(Gravity.CENTER);
@@ -195,6 +197,62 @@ public class MainActivity extends Activity {
         };
         startHourSpinner.setOnItemSelectedListener(saveHours);endHourSpinner.setOnItemSelectedListener(saveHours);
 
+        LinearLayout sleepCard=card();sleepCard.setBackground(round(Color.rgb(251,246,247),22));
+        sleepCard.addView(text("睡眠助手",20,Color.rgb(92,25,34),true));
+        TextView sleepIntro=text("帮助你按时放下手机，让今晚真正开始休息",12,Color.rgb(126,75,82),false);
+        sleepIntro.setPadding(0,dp(6),0,0);sleepCard.addView(sleepIntro);
+        sleepStatus=text("",13,Color.rgb(174,40,52),true);sleepStatus.setPadding(0,dp(12),0,0);sleepCard.addView(sleepStatus);
+
+        LinearLayout sleepModes=row();sleepModes.setPadding(0,dp(14),0,0);
+        sleepOffButton=button("关闭",Color.rgb(240,231,232),Color.rgb(92,25,34));
+        sleepTodayButton=button("今日",Color.rgb(240,231,232),Color.rgb(92,25,34));
+        sleepDailyButton=button("每天",Color.rgb(240,231,232),Color.rgb(92,25,34));
+        sleepModes.addView(sleepOffButton,weighted());
+        LinearLayout.LayoutParams todayParams=weighted();todayParams.setMargins(dp(8),0,0,0);sleepModes.addView(sleepTodayButton,todayParams);
+        LinearLayout.LayoutParams dailyParams=weighted();dailyParams.setMargins(dp(8),0,0,0);sleepModes.addView(sleepDailyButton,dailyParams);
+        sleepCard.addView(sleepModes);
+        sleepOffButton.setOnClickListener(v->setSleepMode(SleepSettings.MODE_OFF));
+        sleepTodayButton.setOnClickListener(v->setSleepMode(SleepSettings.MODE_TODAY));
+        sleepDailyButton.setOnClickListener(v->setSleepMode(SleepSettings.MODE_DAILY));
+
+        String[] clockHours=new String[24],clockMinutes=new String[60];
+        for(int i=0;i<24;i++)clockHours[i]=String.format(Locale.CHINA,"%02d",i);
+        for(int i=0;i<60;i++)clockMinutes[i]=String.format(Locale.CHINA,"%02d",i);
+        sleepStartHourSpinner=spinner(clockHours);sleepStartMinuteSpinner=spinner(clockMinutes);
+        sleepWakeHourSpinner=spinner(clockHours);sleepWakeMinuteSpinner=spinner(clockMinutes);
+        sleepStartHourSpinner.setSelection(prefs.getInt("sleep_start_hour",23));
+        sleepStartMinuteSpinner.setSelection(prefs.getInt("sleep_start_minute",30));
+        sleepWakeHourSpinner.setSelection(prefs.getInt("sleep_wake_hour",7));
+        sleepWakeMinuteSpinner.setSelection(prefs.getInt("sleep_wake_minute",30));
+
+        LinearLayout sleepTimes=row();sleepTimes.setPadding(0,dp(18),0,0);
+        LinearLayout startPicker=row();startPicker.addView(sleepStartHourSpinner,weighted());
+        TextView startColon=text(":",18,Color.rgb(92,25,34),true);startColon.setGravity(Gravity.CENTER);startPicker.addView(startColon,new LinearLayout.LayoutParams(dp(20),dp(52)));
+        startPicker.addView(sleepStartMinuteSpinner,weighted());
+        LinearLayout wakePicker=row();wakePicker.addView(sleepWakeHourSpinner,weighted());
+        TextView wakeColon=text(":",18,Color.rgb(92,25,34),true);wakeColon.setGravity(Gravity.CENTER);wakePicker.addView(wakeColon,new LinearLayout.LayoutParams(dp(20),dp(52)));
+        wakePicker.addView(sleepWakeMinuteSpinner,weighted());
+        sleepTimes.addView(labeled("睡眠时间",startPicker),weightedWrap());
+        LinearLayout.LayoutParams wakeParams=weightedWrap();wakeParams.setMargins(dp(10),0,0,0);sleepTimes.addView(labeled("起床时间",wakePicker),wakeParams);
+        sleepCard.addView(sleepTimes);
+
+        TextView warningHint=text("睡眠前提醒：提前 3 分钟，以红色倒计时提示保存操作",11,Color.rgb(126,75,82),false);
+        warningHint.setPadding(0,dp(14),0,0);sleepCard.addView(warningHint);
+        TextView emergencyHint=text("睡眠期间可下滑通知栏查看消息，通知、来电和闹钟正常可用。",11,Color.rgb(126,75,82),false);
+        emergencyHint.setPadding(0,dp(7),0,0);sleepCard.addView(emergencyHint);
+        TextView manualUnlockHint=text("睡眠锁界面支持紧急解除，每月最多 3 次；确认解除后会自动关闭睡眠助手。",11,Color.rgb(126,75,82),false);
+        manualUnlockHint.setPadding(0,dp(5),0,0);sleepCard.addView(manualUnlockHint);
+        TextView bypassHint=text("来电会立即解除当晚睡眠锁；睡眠中重启后，当晚也不会再次锁定。",11,Color.rgb(126,75,82),false);
+        bypassHint.setPadding(0,dp(5),0,0);sleepCard.addView(bypassHint);
+        root.addView(sleepCard,cardGap);
+
+        android.widget.AdapterView.OnItemSelectedListener saveSleepTime=new android.widget.AdapterView.OnItemSelectedListener(){
+            public void onNothingSelected(android.widget.AdapterView<?> p){}
+            public void onItemSelected(android.widget.AdapterView<?> p,View v,int pos,long id){saveSleepTimes();}
+        };
+        sleepStartHourSpinner.setOnItemSelectedListener(saveSleepTime);sleepStartMinuteSpinner.setOnItemSelectedListener(saveSleepTime);
+        sleepWakeHourSpinner.setOnItemSelectedListener(saveSleepTime);sleepWakeMinuteSpinner.setOnItemSelectedListener(saveSleepTime);
+
         LinearLayout imageCard = card();
         imageCard.addView(text("休息画面", 18, INK, true));
         imageStatus = text(new File(getFilesDir(),"break_image").exists()?"已设置自己的图片":"自然渐变背景", 12, Color.rgb(115,128,121), false);
@@ -235,10 +293,12 @@ public class MainActivity extends Activity {
         updateOverlayStatus();
 
         updateModeButtons();
+        updateSleepUi();
         String mode=effectiveMode();
         if (!"off".equals(mode) && prefs.getBoolean("mode_started",false)
             && (!prefs.getBoolean("user_paused",false) || prefs.getBoolean("running",false)))
             service(EyeRestService.ACTION_REEVALUATE);
+        if(!SleepSettings.MODE_OFF.equals(prefs.getString("sleep_mode",SleepSettings.MODE_OFF)))startSleepService();
         return scroll;
     }
 
@@ -263,6 +323,28 @@ public class MainActivity extends Activity {
             service(EyeRestService.ACTION_MODE_OFF);
         }
         handler.postDelayed(this::refresh,150);
+    }
+    private void setSleepMode(String mode){
+        SleepSettings.setMode(prefs,mode);
+        startSleepService();
+        handler.postDelayed(this::updateSleepUi,150);
+    }
+    private void saveSleepTimes(){
+        if(sleepStartHourSpinner==null||sleepWakeMinuteSpinner==null)return;
+        prefs.edit().putInt("sleep_start_hour",sleepStartHourSpinner.getSelectedItemPosition())
+            .putInt("sleep_start_minute",sleepStartMinuteSpinner.getSelectedItemPosition())
+            .putInt("sleep_wake_hour",sleepWakeHourSpinner.getSelectedItemPosition())
+            .putInt("sleep_wake_minute",sleepWakeMinuteSpinner.getSelectedItemPosition())
+            .putInt("sleep_warning_minutes",3).putString("sleep_bypass_date","")
+            .putString("sleep_bypass_reason",SleepSettings.REASON_NONE).apply();
+        if(SleepSettings.MODE_TODAY.equals(prefs.getString("sleep_mode",SleepSettings.MODE_OFF)))
+            prefs.edit().putString("sleep_mode_date",SleepSettings.activePlanKey(Calendar.getInstance(),prefs)).apply();
+        if(!SleepSettings.MODE_OFF.equals(prefs.getString("sleep_mode",SleepSettings.MODE_OFF)))startSleepService();
+        updateSleepUi();
+    }
+    private void startSleepService(){
+        Intent intent=new Intent(this,SleepService.class).setAction(SleepService.ACTION_REFRESH);
+        try{if(Build.VERSION.SDK_INT>=26)startForegroundService(intent);else startService(intent);}catch(Exception ignored){}
     }
     private void service(String action) {
         Intent i = new Intent(this, EyeRestService.class).setAction(action);
@@ -294,6 +376,41 @@ public class MainActivity extends Activity {
         resetButton.setEnabled(enabled&&started&&active);resetButton.setAlpha(enabled&&started&&active?1f:.45f);
         breakNowButton.setEnabled(enabled&&started&&active);breakNowButton.setAlpha(enabled&&started&&active?1f:.45f);
         updateModeButtons();
+        updateSleepUi();
+    }
+
+    private void updateSleepUi(){
+        if(sleepStatus==null)return;
+        Calendar now=Calendar.getInstance();
+        String mode=prefs.getString("sleep_mode",SleepSettings.MODE_OFF);
+        if(SleepSettings.MODE_TODAY.equals(mode)&&!SleepSettings.isEnabledForPlan(now,prefs)){
+            SleepSettings.setMode(prefs,SleepSettings.MODE_OFF);mode=SleepSettings.MODE_OFF;
+        }
+        String value;
+        if(SleepSettings.MODE_OFF.equals(mode))value="睡眠助手未开启";
+        else if(!SleepSettings.valid(prefs))value="睡眠时间不能与起床时间相同";
+        else if(SleepSettings.hasBypassForCurrentWindow(now,prefs)){
+            String reason=prefs.getString("sleep_bypass_reason",SleepSettings.REASON_NONE);
+            value="今日睡眠已解除 · "+(SleepSettings.REASON_CALL.equals(reason)?"检测到来电":"设备刚刚重启");
+        }else if(SleepSettings.isInSleepWindow(now,prefs)){
+            long left=SleepSettings.wakeForCurrentWindow(now,prefs).getTimeInMillis()-now.getTimeInMillis();
+            value="正在睡眠 · 距离起床 "+SleepSettings.formatDuration(left);
+        }else if(SleepSettings.isInWarningWindow(now,prefs)){
+            long left=SleepSettings.nextStart(now,prefs).getTimeInMillis()-now.getTimeInMillis();
+            value="即将进入睡眠模式 · "+SleepSettings.formatDuration(left);
+        }else{
+            long left=SleepSettings.nextStart(now,prefs).getTimeInMillis()-now.getTimeInMillis();
+            value="距离睡眠还有 "+SleepSettings.formatDuration(left);
+        }
+        sleepStatus.setText(value);
+        styleSleepModeButton(sleepOffButton,SleepSettings.MODE_OFF.equals(mode),false);
+        styleSleepModeButton(sleepTodayButton,SleepSettings.MODE_TODAY.equals(mode),true);
+        styleSleepModeButton(sleepDailyButton,SleepSettings.MODE_DAILY.equals(mode),true);
+    }
+    private void styleSleepModeButton(Button button,boolean selected,boolean enabledMode){
+        if(button==null)return;button.setTextColor(selected?Color.WHITE:Color.rgb(92,25,34));
+        int selectedColor=enabledMode?GREEN:Color.rgb(174,40,52);
+        button.setBackground(round(selected?selectedColor:Color.rgb(240,231,232),12));
     }
 
     private String effectiveMode(){
@@ -470,6 +587,7 @@ public class MainActivity extends Activity {
     @Override protected void onStop() {
         if(prefs.getBoolean("keep_running_closed",false)&&prefs.getBoolean("mode_started",false)&&!"off".equals(effectiveMode()))
             service(EyeRestService.ACTION_REEVALUATE);
+        if(!SleepSettings.MODE_OFF.equals(prefs.getString("sleep_mode",SleepSettings.MODE_OFF)))startSleepService();
         super.onStop();
     }
     @Override protected void onDestroy() {
@@ -478,8 +596,12 @@ public class MainActivity extends Activity {
         handler.removeCallbacks(ticker); super.onDestroy();
     }
     private void requestNotificationPermission() {
-        if (Build.VERSION.SDK_INT>=33 && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS)!=PackageManager.PERMISSION_GRANTED)
-            requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS},7);
+        java.util.ArrayList<String> missing=new java.util.ArrayList<>();
+        if(Build.VERSION.SDK_INT>=33&&checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS)!=PackageManager.PERMISSION_GRANTED)
+            missing.add(Manifest.permission.POST_NOTIFICATIONS);
+        if(checkSelfPermission(Manifest.permission.READ_PHONE_STATE)!=PackageManager.PERMISSION_GRANTED)
+            missing.add(Manifest.permission.READ_PHONE_STATE);
+        if(!missing.isEmpty())requestPermissions(missing.toArray(new String[0]),7);
     }
 
     private LinearLayout column(){ LinearLayout v=new LinearLayout(this);v.setOrientation(LinearLayout.VERTICAL);return v; }

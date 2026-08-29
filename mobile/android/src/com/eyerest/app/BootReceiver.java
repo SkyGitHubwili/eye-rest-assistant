@@ -11,6 +11,18 @@ public class BootReceiver extends BroadcastReceiver {
     public static final String ACTION_RECOVER="com.eyerest.RECOVER";
     @Override public void onReceive(Context context, Intent intent) {
         android.content.SharedPreferences prefs=context.getSharedPreferences("settings", Context.MODE_PRIVATE);
+        String action=intent==null?"":intent.getAction();
+        boolean realBoot=Intent.ACTION_BOOT_COMPLETED.equals(action)||"android.intent.action.QUICKBOOT_POWERON".equals(action);
+        java.util.Calendar calendar=java.util.Calendar.getInstance();
+        if(realBoot&&SleepSettings.isEnabledForPlan(calendar,prefs)
+            &&SleepSettings.isInSleepWindow(calendar,prefs)&&!SleepSettings.hasBypassForCurrentWindow(calendar,prefs))
+            SleepSettings.setBypass(prefs,calendar,SleepSettings.REASON_REBOOT);
+        if(SleepSettings.isEnabledForPlan(calendar,prefs)){
+            Intent sleep=new Intent(context,SleepService.class).setAction(SleepService.ACTION_RECOVER);
+            try{if(Build.VERSION.SDK_INT>=26)context.startForegroundService(sleep);else context.startService(sleep);}catch(Exception ignored){}
+        }
+
+        // 以下保持原护眼助手的恢复条件与行为不变。
         if (!prefs.getBoolean("keep_running_closed",false)) return;
         String mode=prefs.getString("protection_mode", "off");
         Calendar now=Calendar.getInstance();

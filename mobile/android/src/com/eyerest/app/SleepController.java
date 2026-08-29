@@ -1,0 +1,223 @@
+package com.eyerest.app;
+
+import android.app.AlertDialog;
+import android.app.KeyguardManager;
+import android.content.Context;
+import android.content.SharedPreferences;
+import android.graphics.Color;
+import android.graphics.PixelFormat;
+import android.graphics.Typeface;
+import android.graphics.drawable.GradientDrawable;
+import android.os.Build;
+import android.os.PowerManager;
+import android.provider.Settings;
+import android.view.Gravity;
+import android.view.View;
+import android.view.ViewGroup;
+import android.view.WindowManager;
+import android.widget.FrameLayout;
+import android.widget.LinearLayout;
+import android.widget.TextView;
+import android.widget.Button;
+
+import java.util.Calendar;
+
+/** 睡眠状态机及强制 Overlay。与护眼休息层使用相同的窗口层级。 */
+public final class SleepController {
+    public interface Host { void updateSleepNotification(String state,String text); void disableSleepAssistant(); }
+
+    private final Context context;
+    private final SharedPreferences prefs;
+    private final Host host;
+    private WindowManager windows;
+    private View overlay;
+    private TextView title,countdown,tip;
+    private Button manualUnlock;
+    private String state="NORMAL",lastNoticeKey="";
+
+    public SleepController(Context context,SharedPreferences prefs,Host host){
+        this.context=context;this.prefs=prefs;this.host=host;
+    }
+
+    public void evaluate(){
+        Calendar now=Calendar.getInstance();
+        if(!SleepSettings.valid(prefs)||!SleepSettings.isEnabledForPlan(now,prefs)){
+            transition("NORMAL",now);return;
+        }
+        if(SleepSettings.hasBypassForCurrentWindow(now,prefs)){
+            String reason=prefs.getString("sleep_bypass_reason",SleepSettings.REASON_NONE);
+            transition(SleepSettings.REASON_CALL.equals(reason)?"TODAY_BYPASS_CALL":
+                SleepSettings.REASON_MANUAL.equals(reason)?"TODAY_BYPASS_MANUAL":"TODAY_BYPASS_REBOOT",now);return;
+        }
+        if(SleepSettings.isInSleepWindow(now,prefs)){transition("SLEEP_LOCKED",now);return;}
+        if(SleepSettings.isInWarningWindow(now,prefs)){transition("PRE_SLEEP_WARNING",now);return;}
+        transition("NORMAL",now);
+    }
+
+    public void onScreenOff(){removeOverlay();}
+    public void onScreenAvailable(){evaluate();}
+
+    public void onIncomingCall(){
+        Calendar now=Calendar.getInstance();
+        if("SLEEP_LOCKED".equals(state)||"PRE_SLEEP_WARNING".equals(state)||SleepSettings.isInSleepWindow(now,prefs)){
+            SleepSettings.setBypass(prefs,now,SleepSettings.REASON_CALL);
+            transition("TODAY_BYPASS_CALL",now);
+        }
+    }
+
+    private void requestManualUnlockLegacy(){
+        int remaining=earlyEndRemaining();
+        if(remaining<=0)return;
+        new AlertDialog.Builder(context).setTitle("确定解除睡眠？")
+            .setMessage("解除后将自动关闭睡眠助手，本月还剩 "+remaining+" 次紧急解除机会。")
+            .setNegativeButton("取消",null)
+            .setPositiveButton("确定解除",(dialog,which)->{
+                if(!consumeEarlyEnd())return;
+                Calendar now=Calendar.getInstance();
+                SleepSettings.setBypass(prefs,now,SleepSettings.REASON_MANUAL);
+                prefs.edit().putString("sleep_mode",SleepSettings.MODE_OFF)
+                    .putBoolean("sleep_lock_active",false).putString("sleep_state","NORMAL").apply();
+                removeOverlay();
+                host.updateSleepNotification("TODAY_BYPASS_MANUAL","睡眠助手已关闭 · 本次紧急解除");
+                host.disableSleepAssistant();
+            }).show();
+    }
+
+    private void requestManualUnlock(){
+        int remaining=earlyEndRemaining();
+        if(remaining<=0)return;
+        new AlertDialog.Builder(context).setTitle("确定解除睡眠？")
+            .setMessage("解除后将自动关闭睡眠助手，本月还剩 "+remaining+" 次紧急解除机会。")
+            .setNegativeButton("取消",null)
+            .setPositiveButton("确定解除",(dialog,which)->{
+                if(!consumeEarlyEnd())return;
+                Calendar now=Calendar.getInstance();
+                SleepSettings.setBypass(prefs,now,SleepSettings.REASON_MANUAL);
+                prefs.edit().putString("sleep_mode",SleepSettings.MODE_OFF)
+                    .putBoolean("sleep_lock_active",false).putString("sleep_state","NORMAL").apply();
+                removeOverlay();
+                host.updateSleepNotification("TODAY_BYPASS_MANUAL","睡眠助手已关闭 · 本次紧急解除");
+                host.disableSleepAssistant();
+            }).show();
+    }
+
+    public void stop(){removeOverlay();prefs.edit().putBoolean("sleep_lock_active",false).apply();}
+    public String getState(){return state;}
+
+    private void transition(String next,Calendar now){
+        state=next;
+        prefs.edit().putString("sleep_state",state).putBoolean("sleep_lock_active","SLEEP_LOCKED".equals(state)).apply();
+        if("PRE_SLEEP_WARNING".equals(state)){
+            long left=SleepSettings.nextStart(now,prefs).getTimeInMillis()-now.getTimeInMillis();
+            if(isScreenUsable())showOrUpdateWarning(left);else removeOverlay();
+            notifyAtMostEachMinute("warning",left,"即将进入睡眠 · "+SleepSettings.formatDuration(left));
+        }else if("SLEEP_LOCKED".equals(state)){
+            long left=SleepSettings.wakeForCurrentWindow(now,prefs).getTimeInMillis()-now.getTimeInMillis();
+            if(isScreenUsable())showOrUpdateLock(left);else removeOverlay();
+            notifyAtMostEachMinute("locked",left,"睡眠模式进行中 · 距离起床 "+SleepSettings.formatDuration(left));
+        }else{
+            removeOverlay();
+            if("TODAY_BYPASS_CALL".equals(state))notifyOnce("call","今日睡眠已解除 · 检测到来电");
+            else if("TODAY_BYPASS_REBOOT".equals(state))notifyOnce("reboot","今日睡眠已解除 · 设备刚刚重启");
+            else {
+                long left=SleepSettings.nextStart(now,prefs).getTimeInMillis()-now.getTimeInMillis();
+                notifyAtMostEachMinute("normal",left,"距离睡眠 "+SleepSettings.formatDuration(left));
+            }
+        }
+    }
+
+    private void showOrUpdateWarning(long left){
+        if(overlay==null||!"warning".equals(overlay.getTag()))createOverlay(true);
+        title.setText("即将进入睡眠时间");
+        countdown.setText(SleepSettings.formatDuration(left));
+        tip.setText("请保存正在进行的操作");
+        int red=(left<=30_000L&&((left/1000)%2==0))?Color.rgb(116,10,18):Color.rgb(72,7,13);
+        overlay.setBackgroundColor(red);
+    }
+
+    private void showOrUpdateLock(long left){
+        if(overlay==null||!"locked".equals(overlay.getTag()))createOverlay(false);
+        title.setText("到睡眠时间了");
+        countdown.setText(SleepSettings.formatDuration(left));
+        tip.setText("手机已进入睡眠模式\n通知和来电仍然可用");
+    }
+
+    private void createOverlay(boolean warning){
+        removeOverlay();
+        if(!Settings.canDrawOverlays(context))return;
+        windows=(WindowManager)context.getSystemService(Context.WINDOW_SERVICE);
+        FrameLayout root=new FrameLayout(context);root.setTag(warning?"warning":"locked");
+        root.setBackgroundColor(warning?Color.rgb(72,7,13):Color.rgb(10,12,18));
+        root.setClickable(true);root.setFocusable(false);root.setOnTouchListener((v,e)->true);
+
+        LinearLayout content=new LinearLayout(context);content.setOrientation(LinearLayout.VERTICAL);
+        content.setGravity(Gravity.CENTER);content.setPadding(dp(28),dp(48),dp(28),dp(48));
+        title=label("",warning?30:28,warning?Color.rgb(255,105,105):Color.rgb(232,237,246),true);
+        title.setGravity(Gravity.CENTER);content.addView(title,new LinearLayout.LayoutParams(-1,-2));
+        countdown=label("",warning?66:54,warning?Color.rgb(255,63,75):Color.WHITE,true);
+        countdown.setGravity(Gravity.CENTER);countdown.setPadding(0,dp(26),0,dp(24));
+        content.addView(countdown,new LinearLayout.LayoutParams(-1,-2));
+        tip=label("",16,warning?Color.rgb(255,190,190):Color.rgb(166,177,196),false);
+        tip.setGravity(Gravity.CENTER);tip.setLineSpacing(dp(5),1f);content.addView(tip,new LinearLayout.LayoutParams(-1,-2));
+        if(!warning){
+            manualUnlock=new Button(context);
+            int remaining=earlyEndRemaining();
+            manualUnlock.setText(remaining>0?"紧急解除睡眠（本月剩余 "+remaining+" 次）":"本月紧急解除次数已用完");
+            manualUnlock.setTextColor(Color.WHITE);manualUnlock.setTextSize(13);manualUnlock.setAllCaps(false);
+            manualUnlock.setEnabled(remaining>0);manualUnlock.setAlpha(remaining>0?1f:.55f);
+            GradientDrawable buttonBg=new GradientDrawable();buttonBg.setColor(Color.argb(55,255,255,255));buttonBg.setCornerRadius(dp(14));buttonBg.setStroke(dp(1),Color.argb(120,255,255,255));manualUnlock.setBackground(buttonBg);
+            manualUnlock.setOnClickListener(v->requestManualUnlock());
+            LinearLayout.LayoutParams unlockParams=new LinearLayout.LayoutParams(dp(290),dp(52));unlockParams.setMargins(0,dp(30),0,0);
+            content.addView(manualUnlock,unlockParams);
+        }
+        root.addView(content,new FrameLayout.LayoutParams(-1,-1));
+
+        int type=Build.VERSION.SDK_INT>=26?WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY:WindowManager.LayoutParams.TYPE_PHONE;
+        // 不覆盖系统状态栏：锁住普通应用区域，同时保留下拉通知与来电入口。
+        int flags=WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE;
+        WindowManager.LayoutParams lp=new WindowManager.LayoutParams(-1,-1,type,flags,PixelFormat.TRANSLUCENT);
+        lp.gravity=Gravity.TOP|Gravity.START;
+        try{windows.addView(root,lp);overlay=root;}catch(Exception ignored){overlay=null;}
+    }
+
+    private boolean isScreenUsable(){
+        PowerManager power=(PowerManager)context.getSystemService(Context.POWER_SERVICE);
+        if(power==null||!power.isInteractive())return false;
+        KeyguardManager keyguard=(KeyguardManager)context.getSystemService(Context.KEYGUARD_SERVICE);
+        return keyguard==null||!keyguard.isKeyguardLocked();
+    }
+
+    private void removeOverlay(){
+        if(overlay!=null&&windows!=null){try{windows.removeView(overlay);}catch(Exception ignored){}overlay=null;}
+        title=null;countdown=null;tip=null;manualUnlock=null;
+    }
+
+    private void notifyAtMostEachMinute(String prefix,long left,String text){
+        String key=prefix+":"+(left/60_000L);
+        if(!key.equals(lastNoticeKey)){lastNoticeKey=key;host.updateSleepNotification(state,text);}
+    }
+
+    private void notifyOnce(String key,String text){
+        if(!key.equals(lastNoticeKey)){lastNoticeKey=key;host.updateSleepNotification(state,text);}
+    }
+
+    private int earlyEndRemaining(){
+        String month=new java.text.SimpleDateFormat("yyyy-MM",java.util.Locale.CHINA).format(new java.util.Date());
+        if(!month.equals(prefs.getString("sleep_early_end_month","")))
+            prefs.edit().putString("sleep_early_end_month",month).putInt("sleep_early_end_count",0).apply();
+        return Math.max(0,3-prefs.getInt("sleep_early_end_count",0));
+    }
+
+    private boolean consumeEarlyEnd(){
+        int remaining=earlyEndRemaining();
+        if(remaining<=0)return false;
+        prefs.edit().putInt("sleep_early_end_count",prefs.getInt("sleep_early_end_count",0)+1).apply();
+        return true;
+    }
+
+    private TextView label(String value,int sp,int color,boolean bold){
+        TextView view=new TextView(context);view.setText(value);view.setTextSize(sp);view.setTextColor(color);
+        if(bold)view.setTypeface(Typeface.DEFAULT,Typeface.BOLD);return view;
+    }
+    private int dp(int value){return Math.round(value*context.getResources().getDisplayMetrics().density);}
+}
