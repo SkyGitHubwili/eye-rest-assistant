@@ -24,6 +24,7 @@ import java.util.Calendar;
 
 /** 睡眠状态机及强制 Overlay。与护眼休息层使用相同的窗口层级。 */
 public final class SleepController {
+    private static final int MAX_EARLY_ENDS_PER_MONTH = 10;
     public interface Host { void updateSleepNotification(String state,String text); void disableSleepAssistant(); }
 
     private final Context context;
@@ -205,7 +206,7 @@ public final class SleepController {
         String month=new java.text.SimpleDateFormat("yyyy-MM",java.util.Locale.CHINA).format(new java.util.Date());
         if(!month.equals(prefs.getString("sleep_early_end_month","")))
             prefs.edit().putString("sleep_early_end_month",month).putInt("sleep_early_end_count",0).apply();
-        return Math.max(0,3-prefs.getInt("sleep_early_end_count",0));
+        return Math.max(0,MAX_EARLY_ENDS_PER_MONTH-prefs.getInt("sleep_early_end_count",0));
     }
 
     private boolean consumeEarlyEnd(){
