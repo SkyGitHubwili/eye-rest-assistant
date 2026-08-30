@@ -130,8 +130,9 @@ public final class SleepController {
         title.setText("即将进入睡眠时间");
         countdown.setText(SleepSettings.formatDuration(left));
         tip.setText("请保存正在进行的操作");
-        int red=(left<=30_000L&&((left/1000)%2==0))?Color.rgb(116,10,18):Color.rgb(72,7,13);
-        overlay.setBackgroundColor(red);
+        // Keep the reminder text visible without tinting or obscuring the app
+        // underneath; the warning window is already non-touchable.
+        overlay.setBackgroundColor(Color.TRANSPARENT);
     }
 
     private void showOrUpdateLock(long left){
@@ -146,7 +147,7 @@ public final class SleepController {
         if(!Settings.canDrawOverlays(context))return;
         windows=(WindowManager)context.getSystemService(Context.WINDOW_SERVICE);
         FrameLayout root=new FrameLayout(context);root.setTag(warning?"warning":"locked");
-        root.setBackgroundColor(warning?Color.rgb(72,7,13):Color.rgb(10,12,18));
+        root.setBackgroundColor(warning?Color.TRANSPARENT:Color.rgb(10,12,18));
         root.setClickable(!warning);root.setFocusable(false);
         // 根层只负责挡住普通应用；返回 false 让锁层内的“紧急解除”按钮正常收到触摸事件。
         root.setOnTouchListener((v,e)->false);
