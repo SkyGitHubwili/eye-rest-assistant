@@ -134,7 +134,7 @@ public final class SleepController {
         if(overlay==null||!"warning".equals(overlay.getTag()))createOverlay(true);
         title.setText("即将进入睡眠时间");
         countdown.setText(SleepSettings.formatDuration(left));
-        tip.setText("请保存正在进行的操作");
+        tip.setText("准备中 · 可继续操作手机");
         // Keep the compact card background stable while the countdown updates.
     }
 

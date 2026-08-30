@@ -28,9 +28,22 @@ public final class SleepSettings {
     public static boolean valid(SharedPreferences p){return startMinutes(p)!=wakeMinutes(p);}
 
     public static boolean isInSleepWindow(Calendar now,SharedPreferences p){
-        int value=minutesOfDay(now),start=startMinutes(p),wake=wakeMinutes(p);
+        int start=startMinutes(p),wake=wakeMinutes(p);
         if(start==wake)return false;
-        return start<wake?value>=start&&value<wake:value>=start||value<wake;
+        Calendar startAt=(Calendar)now.clone();
+        startAt.set(Calendar.HOUR_OF_DAY,start/60);startAt.set(Calendar.MINUTE,start%60);
+        startAt.set(Calendar.SECOND,0);startAt.set(Calendar.MILLISECOND,0);
+        Calendar wakeAt=(Calendar)now.clone();
+        wakeAt.set(Calendar.HOUR_OF_DAY,wake/60);wakeAt.set(Calendar.MINUTE,wake%60);
+        wakeAt.set(Calendar.SECOND,0);wakeAt.set(Calendar.MILLISECOND,0);
+        if(start>wake)wakeAt.add(Calendar.DAY_OF_MONTH,1);
+        if(!startAt.after(now)&&wakeAt.after(now))return true;
+        if(start>wake){
+            startAt.add(Calendar.DAY_OF_MONTH,-1);
+            wakeAt.add(Calendar.DAY_OF_MONTH,-1);
+            return !startAt.after(now)&&wakeAt.after(now);
+        }
+        return false;
     }
 
     public static Calendar nextStart(Calendar now,SharedPreferences p){
