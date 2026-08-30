@@ -151,9 +151,10 @@ public final class SleepController {
         windows=(WindowManager)context.getSystemService(Context.WINDOW_SERVICE);
         FrameLayout root=new FrameLayout(context);root.setTag(warning?"warning":"locked");
         root.setClipToOutline(true);
+        int opacity=Math.max(0,Math.min(100,prefs.getInt("sleep_warning_alpha",85)));
         if(warning){
             GradientDrawable warningBg=new GradientDrawable();
-            warningBg.setColor(Color.argb(238,72,7,13));warningBg.setCornerRadius(dp(18));
+            warningBg.setColor(Color.argb(opacity*255/100,72,7,13));warningBg.setCornerRadius(dp(18));
             root.setBackground(warningBg);
         }else root.setBackgroundColor(Color.rgb(10,12,18));
         root.setClickable(!warning);root.setFocusable(false);
@@ -167,8 +168,9 @@ public final class SleepController {
             if(imageFile.exists()){
                 ImageView image=new ImageView(context);image.setScaleType(ImageView.ScaleType.CENTER_CROP);
                 image.setImageBitmap(BitmapFactory.decodeFile(imageFile.getAbsolutePath()));
+                image.setAlpha(Math.max(0f,Math.min(1f,prefs.getInt("sleep_warning_alpha",85)/100f)));
                 root.addView(image,new FrameLayout.LayoutParams(-1,dp(220)));
-                View tint=new View(context);tint.setBackgroundColor(Color.argb(145,30,8,18));
+                View tint=new View(context);tint.setBackgroundColor(Color.argb(opacity*120/100,30,8,18));
                 root.addView(tint,new FrameLayout.LayoutParams(-1,dp(220)));
             }
         }

@@ -330,7 +330,18 @@ public class MainActivity extends Activity {
         Button chooseSleep=button("选择自己的图片",Color.rgb(234,240,235),INK);sleepImageActions.addView(chooseSleep,weighted());chooseSleep.setOnClickListener(v->chooseSleepImage());
         Button restoreSleep=button("恢复默认画面",Color.rgb(234,240,235),INK);LinearLayout.LayoutParams restoreSleepP=weighted();restoreSleepP.setMargins(dp(10),0,0,0);sleepImageActions.addView(restoreSleep,restoreSleepP);
         restoreSleep.setOnClickListener(v->{File f=new File(getFilesDir(),"sleep_warning_image");if(f.exists())f.delete();sleepImageStatus.setText("默认提醒画面");sleepPreview.setImageDrawable(null);sleepPreview.setBackground(new GradientDrawable(GradientDrawable.Orientation.TL_BR,new int[]{Color.rgb(72,7,13),Color.rgb(137,35,52)}));});
-        sleepImageCard.addView(sleepImageActions);root.addView(sleepImageCard,cardGap);
+        sleepImageCard.addView(sleepImageActions);
+        TextView alphaLabel=text("提醒背景透明度",12,Color.rgb(115,128,121),false);
+        alphaLabel.setPadding(0,dp(14),0,dp(2));sleepImageCard.addView(alphaLabel);
+        SeekBar alphaSeek=new SeekBar(this);alphaSeek.setMax(100);
+        alphaSeek.setProgress(prefs.getInt("sleep_warning_alpha",85));
+        sleepImageCard.addView(alphaSeek,new LinearLayout.LayoutParams(-1,dp(38)));
+        alphaSeek.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener(){
+            public void onProgressChanged(SeekBar bar,int value,boolean fromUser){if(fromUser)prefs.edit().putInt("sleep_warning_alpha",value).apply();}
+            public void onStartTrackingTouch(SeekBar bar){}
+            public void onStopTrackingTouch(SeekBar bar){}
+        });
+        root.addView(sleepImageCard,cardGap);
 
         LinearLayout permissionCard = card();
         permissionCard.addView(text("全屏提醒权限", 18, INK, true));
