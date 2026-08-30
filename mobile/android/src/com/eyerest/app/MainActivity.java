@@ -239,18 +239,20 @@ public class MainActivity extends Activity {
         // Keep enough width for the hour label (for example "11 PM").  A
         // weighted spinner was too narrow on phones and rendered it as "0..".
         startPicker.addView(sleepStartHourSpinner,new LinearLayout.LayoutParams(dp(54),dp(48)));
-        TextView startColon=text(":",18,Color.rgb(92,25,34),true);startColon.setGravity(Gravity.CENTER);startPicker.addView(startColon,new LinearLayout.LayoutParams(dp(14),dp(52)));
+        TextView startColon=text(":",18,INK,true);startColon.setGravity(Gravity.CENTER);startPicker.addView(startColon,new LinearLayout.LayoutParams(dp(14),dp(52)));
         startPicker.addView(sleepStartMinuteSpinner,new LinearLayout.LayoutParams(dp(44),dp(48)));
         sleepStartPeriod=periodLabel();startPicker.addView(sleepStartPeriod,new LinearLayout.LayoutParams(dp(30),dp(48)));
         LinearLayout wakePicker=row();
         wakePicker.addView(sleepWakeHourSpinner,new LinearLayout.LayoutParams(dp(54),dp(48)));
-        TextView wakeColon=text(":",18,Color.rgb(92,25,34),true);wakeColon.setGravity(Gravity.CENTER);wakePicker.addView(wakeColon,new LinearLayout.LayoutParams(dp(14),dp(52)));
+        TextView wakeColon=text(":",18,INK,true);wakeColon.setGravity(Gravity.CENTER);wakePicker.addView(wakeColon,new LinearLayout.LayoutParams(dp(14),dp(52)));
         wakePicker.addView(sleepWakeMinuteSpinner,new LinearLayout.LayoutParams(dp(44),dp(48)));
         sleepWakePeriod=periodLabel();wakePicker.addView(sleepWakePeriod,new LinearLayout.LayoutParams(dp(30),dp(48)));
         startPicker.setGravity(Gravity.CENTER);wakePicker.setGravity(Gravity.CENTER);
         LinearLayout startBox=blueTimeBox(startPicker),wakeBox=blueTimeBox(wakePicker);
         sleepTimes.addView(sleepLabeled("睡眠时间",startBox),weightedWrap());
         LinearLayout.LayoutParams wakeParams=weightedWrap();wakeParams.setMargins(dp(10),0,0,0);sleepTimes.addView(sleepLabeled("起床时间",wakeBox),wakeParams);
+        sleepStartHourSpinner.setBackgroundColor(Color.TRANSPARENT);sleepStartMinuteSpinner.setBackgroundColor(Color.TRANSPARENT);
+        sleepWakeHourSpinner.setBackgroundColor(Color.TRANSPARENT);sleepWakeMinuteSpinner.setBackgroundColor(Color.TRANSPARENT);
         updateSleepPeriodLabels();
         sleepCard.addView(sleepTimes);
         TextView clockHint=text("小时选项已直接标注 AM/PM，例如下午1:05请选择 01 PM。",11,Color.rgb(126,75,82),false);
@@ -656,8 +658,8 @@ public class MainActivity extends Activity {
         s.setAdapter(adapter);s.setBackground(round(Color.rgb(243,246,242),10));s.setPadding(0,0,0,0);return s;
     }
     private LinearLayout labeled(String label,View child){LinearLayout c=column();TextView l=text(label,12,Color.rgb(115,128,121),false);l.setPadding(0,0,0,dp(6));c.addView(l);c.addView(child,new LinearLayout.LayoutParams(-1,dp(52)));return c;}
-    private LinearLayout sleepLabeled(String label,View child){LinearLayout c=column();TextView l=text(label,12,GREEN,true);l.setPadding(0,0,0,dp(6));c.addView(l);c.addView(child,new LinearLayout.LayoutParams(-1,dp(52)));return c;}
-    private TextView periodLabel(){TextView v=text("PM",13,GREEN,true);v.setGravity(Gravity.CENTER);return v;}
+    private LinearLayout sleepLabeled(String label,View child){LinearLayout c=column();TextView l=text(label,12,Color.rgb(115,128,121),false);l.setPadding(0,0,0,dp(6));c.addView(l);c.addView(child,new LinearLayout.LayoutParams(-1,dp(52)));return c;}
+    private TextView periodLabel(){TextView v=text("PM",13,INK,false);v.setGravity(Gravity.CENTER);return v;}
     private void updateSleepPeriodLabels(){
         if(sleepStartPeriod!=null&&sleepStartHourSpinner!=null)
             sleepStartPeriod.setText(sleepStartHourSpinner.getSelectedItemPosition()<12?"AM":"PM");
@@ -668,7 +670,8 @@ public class MainActivity extends Activity {
         LinearLayout box=row();
         box.setGravity(Gravity.CENTER);
         box.setPadding(dp(6),dp(5),dp(6),dp(5));
-        box.setBackground(round(Color.rgb(224,239,250),14));
+        // Simple neutral card, matching the reference layout.
+        box.setBackground(round(Color.rgb(243,246,242),14));
         box.addView(child,new LinearLayout.LayoutParams(-1,dp(58)));
         return box;
     }
