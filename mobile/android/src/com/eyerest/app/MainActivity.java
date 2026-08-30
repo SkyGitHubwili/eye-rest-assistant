@@ -335,9 +335,13 @@ public class MainActivity extends Activity {
         alphaLabel.setPadding(0,dp(14),0,dp(2));sleepImageCard.addView(alphaLabel);
         SeekBar alphaSeek=new SeekBar(this);alphaSeek.setMax(100);
         alphaSeek.setProgress(prefs.getInt("sleep_warning_alpha",85));
+        sleepPreview.setAlpha(alphaSeek.getProgress()/100f);
         sleepImageCard.addView(alphaSeek,new LinearLayout.LayoutParams(-1,dp(38)));
         alphaSeek.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener(){
-            public void onProgressChanged(SeekBar bar,int value,boolean fromUser){if(fromUser)prefs.edit().putInt("sleep_warning_alpha",value).apply();}
+            public void onProgressChanged(SeekBar bar,int value,boolean fromUser){
+                sleepPreview.setAlpha(value/100f);
+                if(fromUser)prefs.edit().putInt("sleep_warning_alpha",value).apply();
+            }
             public void onStartTrackingTouch(SeekBar bar){}
             public void onStopTrackingTouch(SeekBar bar){}
         });
