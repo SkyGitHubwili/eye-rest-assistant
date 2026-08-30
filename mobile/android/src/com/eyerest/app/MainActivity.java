@@ -42,6 +42,7 @@ public class MainActivity extends Activity {
     private Button sleepOffButton, sleepTodayButton, sleepDailyButton;
     private Spinner workSpinner, startHourSpinner, endHourSpinner;
     private Spinner sleepStartHourSpinner, sleepStartMinuteSpinner, sleepWakeHourSpinner, sleepWakeMinuteSpinner;
+    private Spinner sleepStartPeriodSpinner, sleepWakePeriodSpinner;
     private final android.os.Handler handler = new android.os.Handler();
     private final int[] workValues = {0, 20, 25, 30};
     private boolean openPermissionPageAfterStartup;
@@ -215,27 +216,33 @@ public class MainActivity extends Activity {
         sleepTodayButton.setOnClickListener(v->setSleepMode(SleepSettings.MODE_TODAY));
         sleepDailyButton.setOnClickListener(v->setSleepMode(SleepSettings.MODE_DAILY));
 
-        String[] clockHours=new String[24],clockMinutes=new String[60];
-        for(int i=0;i<24;i++)clockHours[i]=String.format(Locale.CHINA,"%02d",i);
+        String[] clockHours=new String[12],clockMinutes=new String[60];
+        for(int i=0;i<12;i++)clockHours[i]=String.format(Locale.CHINA,"%02d",i+1);
         for(int i=0;i<60;i++)clockMinutes[i]=String.format(Locale.CHINA,"%02d",i);
         sleepStartHourSpinner=spinner(clockHours);sleepStartMinuteSpinner=spinner(clockMinutes);
         sleepWakeHourSpinner=spinner(clockHours);sleepWakeMinuteSpinner=spinner(clockMinutes);
-        sleepStartHourSpinner.setSelection(prefs.getInt("sleep_start_hour",23));
+        sleepStartPeriodSpinner=spinner(new String[]{"AM","PM"});sleepWakePeriodSpinner=spinner(new String[]{"AM","PM"});
+        int savedStartHour=prefs.getInt("sleep_start_hour",23),savedWakeHour=prefs.getInt("sleep_wake_hour",7);
+        sleepStartHourSpinner.setSelection(hour12Index(savedStartHour));
         sleepStartMinuteSpinner.setSelection(prefs.getInt("sleep_start_minute",30));
-        sleepWakeHourSpinner.setSelection(prefs.getInt("sleep_wake_hour",7));
+        sleepStartPeriodSpinner.setSelection(periodIndex(savedStartHour));
+        sleepWakeHourSpinner.setSelection(hour12Index(savedWakeHour));
         sleepWakeMinuteSpinner.setSelection(prefs.getInt("sleep_wake_minute",30));
+        sleepWakePeriodSpinner.setSelection(periodIndex(savedWakeHour));
 
         LinearLayout sleepTimes=row();sleepTimes.setPadding(0,dp(18),0,0);
         LinearLayout startPicker=row();startPicker.addView(sleepStartHourSpinner,weighted());
+        LinearLayout.LayoutParams startPeriodParams=weighted();startPeriodParams.setMargins(dp(4),0,0,0);startPicker.addView(sleepStartPeriodSpinner,startPeriodParams);
         TextView startColon=text(":",18,Color.rgb(92,25,34),true);startColon.setGravity(Gravity.CENTER);startPicker.addView(startColon,new LinearLayout.LayoutParams(dp(20),dp(52)));
         startPicker.addView(sleepStartMinuteSpinner,weighted());
         LinearLayout wakePicker=row();wakePicker.addView(sleepWakeHourSpinner,weighted());
+        LinearLayout.LayoutParams wakePeriodParams=weighted();wakePeriodParams.setMargins(dp(4),0,0,0);wakePicker.addView(sleepWakePeriodSpinner,wakePeriodParams);
         TextView wakeColon=text(":",18,Color.rgb(92,25,34),true);wakeColon.setGravity(Gravity.CENTER);wakePicker.addView(wakeColon,new LinearLayout.LayoutParams(dp(20),dp(52)));
         wakePicker.addView(sleepWakeMinuteSpinner,weighted());
         sleepTimes.addView(labeled("睡眠时间",startPicker),weightedWrap());
         LinearLayout.LayoutParams wakeParams=weightedWrap();wakeParams.setMargins(dp(10),0,0,0);sleepTimes.addView(labeled("起床时间",wakePicker),wakeParams);
         sleepCard.addView(sleepTimes);
-        TextView clockHint=text("时间采用24小时制：下午1点请选择13，凌晨1点请选择01。",11,Color.rgb(126,75,82),false);
+        TextView clockHint=text("请选择小时、AM/PM 和分钟，例如下午1:05请选择 01 PM。",11,Color.rgb(126,75,82),false);
         clockHint.setPadding(0,dp(8),0,0);sleepCard.addView(clockHint);
 
         TextView warningHint=text("睡眠前提醒：提前 3 分钟，以红色倒计时提示保存操作",11,Color.rgb(126,75,82),false);
@@ -252,8 +259,8 @@ public class MainActivity extends Activity {
             public void onNothingSelected(android.widget.AdapterView<?> p){}
             public void onItemSelected(android.widget.AdapterView<?> p,View v,int pos,long id){saveSleepTimes();}
         };
-        sleepStartHourSpinner.setOnItemSelectedListener(saveSleepTime);sleepStartMinuteSpinner.setOnItemSelectedListener(saveSleepTime);
-        sleepWakeHourSpinner.setOnItemSelectedListener(saveSleepTime);sleepWakeMinuteSpinner.setOnItemSelectedListener(saveSleepTime);
+        sleepStartHourSpinner.setOnItemSelectedListener(saveSleepTime);sleepStartMinuteSpinner.setOnItemSelectedListener(saveSleepTime);sleepStartPeriodSpinner.setOnItemSelectedListener(saveSleepTime);
+        sleepWakeHourSpinner.setOnItemSelectedListener(saveSleepTime);sleepWakeMinuteSpinner.setOnItemSelectedListener(saveSleepTime);sleepWakePeriodSpinner.setOnItemSelectedListener(saveSleepTime);
 
         LinearLayout imageCard = card();
         imageCard.addView(text("休息画面", 18, INK, true));
@@ -333,9 +340,11 @@ public class MainActivity extends Activity {
     }
     private void saveSleepTimes(){
         if(sleepStartHourSpinner==null||sleepWakeMinuteSpinner==null)return;
-        prefs.edit().putInt("sleep_start_hour",sleepStartHourSpinner.getSelectedItemPosition())
+        int startHour=hour24(sleepStartHourSpinner.getSelectedItemPosition()+1,sleepStartPeriodSpinner.getSelectedItemPosition());
+        int wakeHour=hour24(sleepWakeHourSpinner.getSelectedItemPosition()+1,sleepWakePeriodSpinner.getSelectedItemPosition());
+        prefs.edit().putInt("sleep_start_hour",startHour)
             .putInt("sleep_start_minute",sleepStartMinuteSpinner.getSelectedItemPosition())
-            .putInt("sleep_wake_hour",sleepWakeHourSpinner.getSelectedItemPosition())
+            .putInt("sleep_wake_hour",wakeHour)
             .putInt("sleep_wake_minute",sleepWakeMinuteSpinner.getSelectedItemPosition())
             .putInt("sleep_warning_minutes",3).putString("sleep_bypass_date","")
             .putString("sleep_bypass_reason",SleepSettings.REASON_NONE).apply();
@@ -649,6 +658,9 @@ public class MainActivity extends Activity {
                 .putBoolean("user_paused",false).putLong("remaining_ms",0).putLong("work_end",0).apply();
     }
     private int breakSecondsForWork(int work){return work==0?10:work;}
+    private int hour12Index(int hour24){int h=hour24%12;return h==0?11:h-1;}
+    private int periodIndex(int hour24){return hour24>=12?1:0;}
+    private int hour24(int hour12,int period){if(hour12==12)return period==1?12:0;return period==1?hour12+12:hour12;}
     private long fullWorkMillis(){return prefs.getInt("work_minutes",20)==0?10000L:prefs.getInt("work_minutes",20)*60000L;}
     private boolean isWithinActiveHours(){
         int hour=Calendar.getInstance().get(Calendar.HOUR_OF_DAY),start=prefs.getInt("start_hour",8),end=prefs.getInt("end_hour",23);
