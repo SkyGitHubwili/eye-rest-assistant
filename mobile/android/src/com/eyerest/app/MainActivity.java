@@ -40,7 +40,7 @@ public class MainActivity extends Activity {
     private ImageView breakPreview;
     private Button toggle, resetButton, breakNowButton, manualModeButton, autoModeButton, offModeButton;
     private Button sleepOffButton, sleepTodayButton, sleepDailyButton;
-    private Spinner workSpinner, startHourSpinner, endHourSpinner;
+    private Spinner workSpinner, startHourSpinner, startMinuteSpinner, endHourSpinner, endMinuteSpinner;
     private Spinner sleepStartHourSpinner, sleepStartMinuteSpinner, sleepWakeHourSpinner, sleepWakeMinuteSpinner;
     private TextView sleepStartPeriod, sleepWakePeriod;
     private final android.os.Handler handler = new android.os.Handler();
@@ -180,12 +180,18 @@ public class MainActivity extends Activity {
         TextView backgroundHint=text("要像电脑开机自启一样运行，请按提示打开自启动和后台运行权限。",13,GREEN,false);
         backgroundHint.setPadding(0,dp(2),0,dp(24));
         autoCard.addView(backgroundHint);
-        String[] hours = new String[24]; for(int i=0;i<24;i++) hours[i]=String.format(Locale.CHINA,"%02d:00",i);
-        startHourSpinner=spinner(hours); endHourSpinner=spinner(hours);
-        startHourSpinner.setSelection(prefs.getInt("start_hour",8)); endHourSpinner.setSelection(prefs.getInt("end_hour",23));
+        String[] hours = new String[24], minutes = new String[60];
+        for(int i=0;i<24;i++) hours[i]=String.format(Locale.CHINA,"%02d",i);
+        for(int i=0;i<60;i++) minutes[i]=String.format(Locale.CHINA,"%02d",i);
+        startHourSpinner=spinner(hours); startMinuteSpinner=spinner(minutes);
+        endHourSpinner=spinner(hours); endMinuteSpinner=spinner(minutes);
+        startHourSpinner.setSelection(prefs.getInt("start_hour",8)); startMinuteSpinner.setSelection(prefs.getInt("start_minute",0));
+        endHourSpinner.setSelection(prefs.getInt("end_hour",23)); endMinuteSpinner.setSelection(prefs.getInt("end_minute",0));
         LinearLayout hourRow=row(); hourRow.setPadding(0,dp(20),0,0);
-        hourRow.addView(labeled("开始时间",startHourSpinner),weightedWrap());
-        LinearLayout.LayoutParams eh=weightedWrap();eh.setMargins(dp(10),0,0,0);hourRow.addView(labeled("结束时间",endHourSpinner),eh);autoCard.addView(hourRow);
+        LinearLayout startTimePicker=compactTimePicker(startHourSpinner,startMinuteSpinner);
+        LinearLayout endTimePicker=compactTimePicker(endHourSpinner,endMinuteSpinner);
+        hourRow.addView(labeled("开始时间",startTimePicker),weightedWrap());
+        LinearLayout.LayoutParams eh=weightedWrap();eh.setMargins(dp(10),0,0,0);hourRow.addView(labeled("结束时间",endTimePicker),eh);autoCard.addView(hourRow);
         TextView sleepHint=text("时间段外自动暂停；手动模式次日自动关闭，自动模式次日继续。",11,Color.rgb(137,148,142),false);sleepHint.setPadding(0,dp(10),0,0);autoCard.addView(sleepHint);
         root.addView(autoCard,cardGap);
         keepRunningClosed.setOnClickListener(v->{
@@ -199,11 +205,13 @@ public class MainActivity extends Activity {
         android.widget.AdapterView.OnItemSelectedListener saveHours=new android.widget.AdapterView.OnItemSelectedListener(){
             public void onNothingSelected(android.widget.AdapterView<?> p){}
             public void onItemSelected(android.widget.AdapterView<?> p,View v,int pos,long id){
-                prefs.edit().putInt("start_hour",startHourSpinner.getSelectedItemPosition()).putInt("end_hour",endHourSpinner.getSelectedItemPosition()).apply();
+                prefs.edit().putInt("start_hour",startHourSpinner.getSelectedItemPosition()).putInt("start_minute",startMinuteSpinner.getSelectedItemPosition())
+                    .putInt("end_hour",endHourSpinner.getSelectedItemPosition()).putInt("end_minute",endMinuteSpinner.getSelectedItemPosition()).apply();
                 if(!"off".equals(effectiveMode()))service(EyeRestService.ACTION_REEVALUATE);
             }
         };
-        startHourSpinner.setOnItemSelectedListener(saveHours);endHourSpinner.setOnItemSelectedListener(saveHours);
+        startHourSpinner.setOnItemSelectedListener(saveHours);startMinuteSpinner.setOnItemSelectedListener(saveHours);
+        endHourSpinner.setOnItemSelectedListener(saveHours);endMinuteSpinner.setOnItemSelectedListener(saveHours);
 
         LinearLayout sleepCard=card();sleepCard.setBackground(round(Color.rgb(251,246,247),22));
         sleepCard.addView(text("睡眠助手",20,Color.rgb(92,25,34),true));
@@ -224,7 +232,7 @@ public class MainActivity extends Activity {
         sleepDailyButton.setOnClickListener(v->setSleepMode(SleepSettings.MODE_DAILY));
 
         String[] clockHours=new String[24],clockMinutes=new String[60];
-        for(int i=0;i<24;i++)clockHours[i]=hourOption(i);
+        for(int i=0;i<24;i++)clockHours[i]=String.format(Locale.CHINA,"%02d",i);
         for(int i=0;i<60;i++)clockMinutes[i]=String.format(Locale.CHINA,"%02d",i);
         sleepStartHourSpinner=spinner(clockHours);sleepStartMinuteSpinner=spinner(clockMinutes);
         sleepWakeHourSpinner=spinner(clockHours);sleepWakeMinuteSpinner=spinner(clockMinutes);
@@ -247,6 +255,7 @@ public class MainActivity extends Activity {
         TextView wakeColon=text(":",18,INK,true);wakeColon.setGravity(Gravity.CENTER);wakePicker.addView(wakeColon,new LinearLayout.LayoutParams(dp(14),dp(52)));
         wakePicker.addView(sleepWakeMinuteSpinner,new LinearLayout.LayoutParams(dp(44),dp(48)));
         sleepWakePeriod=periodLabel();wakePicker.addView(sleepWakePeriod,new LinearLayout.LayoutParams(dp(30),dp(48)));
+        sleepStartPeriod.setVisibility(View.GONE);sleepWakePeriod.setVisibility(View.GONE);
         startPicker.setGravity(Gravity.CENTER);wakePicker.setGravity(Gravity.CENTER);
         LinearLayout startBox=blueTimeBox(startPicker),wakeBox=blueTimeBox(wakePicker);
         sleepTimes.addView(sleepLabeled("睡眠时间",startBox),weightedWrap());
@@ -255,7 +264,7 @@ public class MainActivity extends Activity {
         sleepWakeHourSpinner.setBackgroundColor(Color.TRANSPARENT);sleepWakeMinuteSpinner.setBackgroundColor(Color.TRANSPARENT);
         updateSleepPeriodLabels();
         sleepCard.addView(sleepTimes);
-        TextView clockHint=text("小时选项已直接标注 AM/PM，例如下午1:05请选择 01 PM。",11,Color.rgb(126,75,82),false);
+        TextView clockHint=text("睡眠时间使用 24 小时制，例如 23:30。",11,Color.rgb(126,75,82),false);
         clockHint.setPadding(0,dp(8),0,0);sleepCard.addView(clockHint);
 
         TextView warningHint=text("睡眠前提醒：提前 3 分钟，以红色倒计时提示保存操作",11,Color.rgb(126,75,82),false);
@@ -675,6 +684,13 @@ public class MainActivity extends Activity {
         box.addView(child,new LinearLayout.LayoutParams(-1,dp(58)));
         return box;
     }
+    private LinearLayout compactTimePicker(Spinner hour,Spinner minute){
+        LinearLayout p=row();p.setGravity(Gravity.CENTER);
+        p.addView(hour,new LinearLayout.LayoutParams(0,dp(52),1));
+        TextView colon=text(":",16,INK,true);colon.setGravity(Gravity.CENTER);p.addView(colon,new LinearLayout.LayoutParams(dp(14),dp(52)));
+        p.addView(minute,new LinearLayout.LayoutParams(0,dp(52),1));
+        return p;
+    }
     private LinearLayout.LayoutParams weighted(){return new LinearLayout.LayoutParams(0,dp(48),1);}
     private LinearLayout.LayoutParams weightedWrap(){return new LinearLayout.LayoutParams(0,ViewGroup.LayoutParams.WRAP_CONTENT,1);}
     private GradientDrawable round(int color,int radius){GradientDrawable d=new GradientDrawable();d.setColor(color);d.setCornerRadius(dp(radius));return d;}
@@ -697,7 +713,10 @@ public class MainActivity extends Activity {
     private String hourOption(int hour24){int hour12=hour24%12; if(hour12==0)hour12=12; return String.format(Locale.CHINA,"%02d %s",hour12,hour24<12?"AM":"PM");}
     private long fullWorkMillis(){return prefs.getInt("work_minutes",20)==0?10000L:prefs.getInt("work_minutes",20)*60000L;}
     private boolean isWithinActiveHours(){
-        int hour=Calendar.getInstance().get(Calendar.HOUR_OF_DAY),start=prefs.getInt("start_hour",8),end=prefs.getInt("end_hour",23);
-        if(start==end)return true;return start<end?hour>=start&&hour<end:hour>=start||hour<end;
+        Calendar now=Calendar.getInstance();
+        int value=now.get(Calendar.HOUR_OF_DAY)*60+now.get(Calendar.MINUTE);
+        int start=prefs.getInt("start_hour",8)*60+prefs.getInt("start_minute",0);
+        int end=prefs.getInt("end_hour",23)*60+prefs.getInt("end_minute",0);
+        if(start==end)return true;return start<end?value>=start&&value<end:value>=start||value<end;
     }
 }
