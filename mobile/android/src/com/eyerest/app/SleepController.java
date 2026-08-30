@@ -130,9 +130,7 @@ public final class SleepController {
         title.setText("即将进入睡眠时间");
         countdown.setText(SleepSettings.formatDuration(left));
         tip.setText("请保存正在进行的操作");
-        // Keep the reminder text visible without tinting or obscuring the app
-        // underneath; the warning window is already non-touchable.
-        overlay.setBackgroundColor(Color.TRANSPARENT);
+        // Keep the compact card background stable while the countdown updates.
     }
 
     private void showOrUpdateLock(long left){
@@ -147,19 +145,23 @@ public final class SleepController {
         if(!Settings.canDrawOverlays(context))return;
         windows=(WindowManager)context.getSystemService(Context.WINDOW_SERVICE);
         FrameLayout root=new FrameLayout(context);root.setTag(warning?"warning":"locked");
-        root.setBackgroundColor(warning?Color.TRANSPARENT:Color.rgb(10,12,18));
+        if(warning){
+            GradientDrawable warningBg=new GradientDrawable();
+            warningBg.setColor(Color.argb(238,72,7,13));warningBg.setCornerRadius(dp(18));
+            root.setBackground(warningBg);
+        }else root.setBackgroundColor(Color.rgb(10,12,18));
         root.setClickable(!warning);root.setFocusable(false);
         // 根层只负责挡住普通应用；返回 false 让锁层内的“紧急解除”按钮正常收到触摸事件。
         root.setOnTouchListener((v,e)->false);
 
         LinearLayout content=new LinearLayout(context);content.setOrientation(LinearLayout.VERTICAL);
         content.setGravity(Gravity.CENTER);content.setPadding(dp(28),warning?dp(20):dp(48),dp(28),warning?dp(20):dp(48));
-        title=label("",warning?30:28,warning?Color.rgb(255,105,105):Color.rgb(232,237,246),true);
+        title=label("",warning?22:28,warning?Color.rgb(255,145,145):Color.rgb(232,237,246),true);
         title.setGravity(Gravity.CENTER);content.addView(title,new LinearLayout.LayoutParams(-1,-2));
-        countdown=label("",warning?66:54,warning?Color.rgb(255,63,75):Color.WHITE,true);
+        countdown=label("",warning?44:54,warning?Color.rgb(255,105,115):Color.WHITE,true);
         countdown.setGravity(Gravity.CENTER);countdown.setPadding(0,dp(26),0,dp(24));
         content.addView(countdown,new LinearLayout.LayoutParams(-1,-2));
-        tip=label("",16,warning?Color.rgb(255,190,190):Color.rgb(166,177,196),false);
+        tip=label("",warning?14:16,warning?Color.rgb(255,215,215):Color.rgb(166,177,196),false);
         tip.setGravity(Gravity.CENTER);tip.setLineSpacing(dp(5),1f);content.addView(tip,new LinearLayout.LayoutParams(-1,-2));
         if(!warning){
             manualUnlock=new Button(context);
@@ -178,7 +180,7 @@ public final class SleepController {
         // 不覆盖系统状态栏：锁住普通应用区域，同时保留下拉通知与来电入口。
         int flags=WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE;
         if(warning)flags|=WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE;
-        WindowManager.LayoutParams lp=new WindowManager.LayoutParams(-1,warning?WindowManager.LayoutParams.WRAP_CONTENT:-1,type,flags,PixelFormat.TRANSLUCENT);
+        WindowManager.LayoutParams lp=new WindowManager.LayoutParams(warning?dp(340):-1,warning?WindowManager.LayoutParams.WRAP_CONTENT:-1,type,flags,PixelFormat.TRANSLUCENT);
         lp.gravity=warning?(Gravity.TOP|Gravity.CENTER_HORIZONTAL):(Gravity.TOP|Gravity.START);
         if(warning)lp.y=dp(72);
         try{windows.addView(root,lp);overlay=root;}catch(Exception ignored){overlay=null;}
