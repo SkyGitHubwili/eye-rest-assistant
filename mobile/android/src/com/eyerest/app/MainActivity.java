@@ -227,10 +227,14 @@ public class MainActivity extends Activity {
         sleepWakeMinuteSpinner.setSelection(prefs.getInt("sleep_wake_minute",0));
 
         LinearLayout sleepTimes=row();sleepTimes.setPadding(0,dp(18),0,0);
-        LinearLayout startPicker=row();startPicker.addView(sleepStartHourSpinner,weighted());
+        LinearLayout startPicker=row();
+        // Keep enough width for the hour label (for example "11 PM").  A
+        // weighted spinner was too narrow on phones and rendered it as "0..".
+        startPicker.addView(sleepStartHourSpinner,new LinearLayout.LayoutParams(dp(84),dp(48)));
         TextView startColon=text(":",18,Color.rgb(92,25,34),true);startColon.setGravity(Gravity.CENTER);startPicker.addView(startColon,new LinearLayout.LayoutParams(dp(20),dp(52)));
         startPicker.addView(sleepStartMinuteSpinner,weighted());
-        LinearLayout wakePicker=row();wakePicker.addView(sleepWakeHourSpinner,weighted());
+        LinearLayout wakePicker=row();
+        wakePicker.addView(sleepWakeHourSpinner,new LinearLayout.LayoutParams(dp(84),dp(48)));
         TextView wakeColon=text(":",18,Color.rgb(92,25,34),true);wakeColon.setGravity(Gravity.CENTER);wakePicker.addView(wakeColon,new LinearLayout.LayoutParams(dp(20),dp(52)));
         wakePicker.addView(sleepWakeMinuteSpinner,weighted());
         sleepTimes.addView(labeled("睡眠时间",startPicker),weightedWrap());
@@ -623,7 +627,8 @@ public class MainActivity extends Activity {
                 TextView label=(TextView)view;
                 label.setTextColor(INK);label.setTextSize(14);label.setSingleLine(true);
                 label.setGravity(Gravity.START|Gravity.CENTER_VERTICAL);
-                label.setPadding(dp(12),0,dp(dropdown?12:24),0);label.setMinHeight(dp(52));
+                // The selected value needs to fit "11 PM" without ellipsis.
+                label.setPadding(dp(dropdown?10:6),0,dp(dropdown?10:6),0);label.setMinHeight(dp(52));
                 return label;
             }
             @Override public View getView(int position,View convertView,ViewGroup parent){return style(super.getView(position,convertView,parent),false);}
