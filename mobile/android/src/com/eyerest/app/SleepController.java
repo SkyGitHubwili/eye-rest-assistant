@@ -150,6 +150,7 @@ public final class SleepController {
         if(!Settings.canDrawOverlays(context))return;
         windows=(WindowManager)context.getSystemService(Context.WINDOW_SERVICE);
         FrameLayout root=new FrameLayout(context);root.setTag(warning?"warning":"locked");
+        root.setClipToOutline(true);
         if(warning){
             GradientDrawable warningBg=new GradientDrawable();
             warningBg.setColor(Color.argb(238,72,7,13));warningBg.setCornerRadius(dp(18));
@@ -166,9 +167,9 @@ public final class SleepController {
             if(imageFile.exists()){
                 ImageView image=new ImageView(context);image.setScaleType(ImageView.ScaleType.CENTER_CROP);
                 image.setImageBitmap(BitmapFactory.decodeFile(imageFile.getAbsolutePath()));
-                root.addView(image,new FrameLayout.LayoutParams(-1,-1));
+                root.addView(image,new FrameLayout.LayoutParams(-1,dp(220)));
                 View tint=new View(context);tint.setBackgroundColor(Color.argb(145,30,8,18));
-                root.addView(tint,new FrameLayout.LayoutParams(-1,-1));
+                root.addView(tint,new FrameLayout.LayoutParams(-1,dp(220)));
             }
         }
         title=label("",warning?22:28,warning?Color.rgb(255,145,145):Color.rgb(232,237,246),true);
@@ -195,7 +196,7 @@ public final class SleepController {
         // 不覆盖系统状态栏：锁住普通应用区域，同时保留下拉通知与来电入口。
         int flags=WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE;
         if(warning)flags|=WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE;
-        WindowManager.LayoutParams lp=new WindowManager.LayoutParams(warning?dp(300):-1,warning?WindowManager.LayoutParams.WRAP_CONTENT:-1,type,flags,PixelFormat.TRANSLUCENT);
+        WindowManager.LayoutParams lp=new WindowManager.LayoutParams(warning?dp(240):-1,warning?WindowManager.LayoutParams.WRAP_CONTENT:-1,type,flags,PixelFormat.TRANSLUCENT);
         lp.gravity=warning?(Gravity.TOP|Gravity.CENTER_HORIZONTAL):(Gravity.TOP|Gravity.START);
         if(warning)lp.y=dp(72);
         try{windows.addView(root,lp);overlay=root;}catch(Exception ignored){overlay=null;}
