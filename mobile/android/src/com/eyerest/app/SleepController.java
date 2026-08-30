@@ -108,7 +108,7 @@ public final class SleepController {
         if("PRE_SLEEP_WARNING".equals(state)){
             long left=SleepSettings.nextStart(now,prefs).getTimeInMillis()-now.getTimeInMillis();
             // 睡前提醒阶段必须允许用户设置闹钟、保存工作和关闭后台软件，不显示拦截触摸的全屏层。
-            removeOverlay();
+            if(isScreenUsable())showOrUpdateWarning(left);else removeOverlay();
             notifyAtMostEachMinute("warning",left,"即将进入睡眠 · "+SleepSettings.formatDuration(left));
         }else if("SLEEP_LOCKED".equals(state)){
             long left=SleepSettings.wakeForCurrentWindow(now,prefs).getTimeInMillis()-now.getTimeInMillis();
@@ -147,12 +147,12 @@ public final class SleepController {
         windows=(WindowManager)context.getSystemService(Context.WINDOW_SERVICE);
         FrameLayout root=new FrameLayout(context);root.setTag(warning?"warning":"locked");
         root.setBackgroundColor(warning?Color.rgb(72,7,13):Color.rgb(10,12,18));
-        root.setClickable(true);root.setFocusable(false);
+        root.setClickable(!warning);root.setFocusable(false);
         // 根层只负责挡住普通应用；返回 false 让锁层内的“紧急解除”按钮正常收到触摸事件。
         root.setOnTouchListener((v,e)->false);
 
         LinearLayout content=new LinearLayout(context);content.setOrientation(LinearLayout.VERTICAL);
-        content.setGravity(Gravity.CENTER);content.setPadding(dp(28),dp(48),dp(28),dp(48));
+        content.setGravity(Gravity.CENTER);content.setPadding(dp(28),warning?dp(20):dp(48),dp(28),warning?dp(20):dp(48));
         title=label("",warning?30:28,warning?Color.rgb(255,105,105):Color.rgb(232,237,246),true);
         title.setGravity(Gravity.CENTER);content.addView(title,new LinearLayout.LayoutParams(-1,-2));
         countdown=label("",warning?66:54,warning?Color.rgb(255,63,75):Color.WHITE,true);
@@ -171,13 +171,15 @@ public final class SleepController {
             LinearLayout.LayoutParams unlockParams=new LinearLayout.LayoutParams(dp(290),dp(52));unlockParams.setMargins(0,dp(30),0,0);
             content.addView(manualUnlock,unlockParams);
         }
-        root.addView(content,new FrameLayout.LayoutParams(-1,-1));
+        root.addView(content,new FrameLayout.LayoutParams(-1,warning?ViewGroup.LayoutParams.WRAP_CONTENT:-1));
 
         int type=Build.VERSION.SDK_INT>=26?WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY:WindowManager.LayoutParams.TYPE_PHONE;
         // 不覆盖系统状态栏：锁住普通应用区域，同时保留下拉通知与来电入口。
         int flags=WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE;
-        WindowManager.LayoutParams lp=new WindowManager.LayoutParams(-1,-1,type,flags,PixelFormat.TRANSLUCENT);
-        lp.gravity=Gravity.TOP|Gravity.START;
+        if(warning)flags|=WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE;
+        WindowManager.LayoutParams lp=new WindowManager.LayoutParams(-1,warning?WindowManager.LayoutParams.WRAP_CONTENT:-1,type,flags,PixelFormat.TRANSLUCENT);
+        lp.gravity=warning?(Gravity.TOP|Gravity.CENTER_HORIZONTAL):(Gravity.TOP|Gravity.START);
+        if(warning)lp.y=dp(72);
         try{windows.addView(root,lp);overlay=root;}catch(Exception ignored){overlay=null;}
     }
 
