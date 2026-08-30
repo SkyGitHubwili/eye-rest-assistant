@@ -18,7 +18,7 @@ public final class SleepSettings {
     }
 
     public static int wakeMinutes(SharedPreferences p){
-        return p.getInt("sleep_wake_hour",7)*60+p.getInt("sleep_wake_minute",30);
+        return p.getInt("sleep_wake_hour",8)*60+p.getInt("sleep_wake_minute",0);
     }
 
     public static int minutesOfDay(Calendar c){
@@ -44,8 +44,8 @@ public final class SleepSettings {
 
     public static Calendar wakeForCurrentWindow(Calendar now,SharedPreferences p){
         Calendar wake=(Calendar)now.clone();
-        wake.set(Calendar.HOUR_OF_DAY,p.getInt("sleep_wake_hour",7));
-        wake.set(Calendar.MINUTE,p.getInt("sleep_wake_minute",30));
+        wake.set(Calendar.HOUR_OF_DAY,p.getInt("sleep_wake_hour",8));
+        wake.set(Calendar.MINUTE,p.getInt("sleep_wake_minute",0));
         wake.set(Calendar.SECOND,0);wake.set(Calendar.MILLISECOND,0);
         if(!wake.after(now))wake.add(Calendar.DAY_OF_MONTH,1);
         return wake;

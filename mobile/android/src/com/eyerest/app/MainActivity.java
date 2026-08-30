@@ -220,11 +220,11 @@ public class MainActivity extends Activity {
         for(int i=0;i<60;i++)clockMinutes[i]=String.format(Locale.CHINA,"%02d",i);
         sleepStartHourSpinner=spinner(clockHours);sleepStartMinuteSpinner=spinner(clockMinutes);
         sleepWakeHourSpinner=spinner(clockHours);sleepWakeMinuteSpinner=spinner(clockMinutes);
-        int savedStartHour=prefs.getInt("sleep_start_hour",23),savedWakeHour=prefs.getInt("sleep_wake_hour",7);
+        int savedStartHour=prefs.getInt("sleep_start_hour",23),savedWakeHour=prefs.getInt("sleep_wake_hour",8);
         sleepStartHourSpinner.setSelection(savedStartHour);
         sleepStartMinuteSpinner.setSelection(prefs.getInt("sleep_start_minute",30));
         sleepWakeHourSpinner.setSelection(savedWakeHour);
-        sleepWakeMinuteSpinner.setSelection(prefs.getInt("sleep_wake_minute",30));
+        sleepWakeMinuteSpinner.setSelection(prefs.getInt("sleep_wake_minute",0));
 
         LinearLayout sleepTimes=row();sleepTimes.setPadding(0,dp(18),0,0);
         LinearLayout startPicker=row();startPicker.addView(sleepStartHourSpinner,weighted());
@@ -240,13 +240,13 @@ public class MainActivity extends Activity {
         clockHint.setPadding(0,dp(8),0,0);sleepCard.addView(clockHint);
 
         TextView warningHint=text("睡眠前提醒：提前 3 分钟，以红色倒计时提示保存操作",11,Color.rgb(126,75,82),false);
-        warningHint.setPadding(0,dp(14),0,0);sleepCard.addView(warningHint);
+        warningHint.setLineSpacing(dp(3),1f);warningHint.setPadding(0,dp(14),0,dp(10));sleepCard.addView(warningHint);
         TextView emergencyHint=text("睡眠期间可下滑通知栏查看消息，通知、来电和闹钟正常可用。",11,Color.rgb(126,75,82),false);
-        emergencyHint.setPadding(0,dp(7),0,0);sleepCard.addView(emergencyHint);
+        emergencyHint.setLineSpacing(dp(3),1f);emergencyHint.setPadding(0,dp(4),0,dp(10));sleepCard.addView(emergencyHint);
         TextView manualUnlockHint=text("睡眠锁界面支持紧急解除，每月最多 3 次；确认解除后会自动关闭睡眠助手。",11,Color.rgb(126,75,82),false);
-        manualUnlockHint.setPadding(0,dp(5),0,0);sleepCard.addView(manualUnlockHint);
+        manualUnlockHint.setLineSpacing(dp(3),1f);manualUnlockHint.setPadding(0,dp(4),0,dp(10));sleepCard.addView(manualUnlockHint);
         TextView bypassHint=text("来电会立即解除当晚睡眠锁；睡眠中重启后，当晚也不会再次锁定。",11,Color.rgb(126,75,82),false);
-        bypassHint.setPadding(0,dp(5),0,0);sleepCard.addView(bypassHint);
+        bypassHint.setLineSpacing(dp(3),1f);bypassHint.setPadding(0,dp(4),0,dp(4));sleepCard.addView(bypassHint);
         root.addView(sleepCard,cardGap);
 
         android.widget.AdapterView.OnItemSelectedListener saveSleepTime=new android.widget.AdapterView.OnItemSelectedListener(){
