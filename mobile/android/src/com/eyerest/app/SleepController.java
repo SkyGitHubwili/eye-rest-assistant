@@ -65,40 +65,37 @@ public final class SleepController {
         }
     }
 
-    private void requestManualUnlockLegacy(){
-        int remaining=earlyEndRemaining();
-        if(remaining<=0)return;
-        new AlertDialog.Builder(context).setTitle("确定解除睡眠？")
-            .setMessage("解除后将自动关闭睡眠助手，本月还剩 "+remaining+" 次紧急解除机会。")
-            .setNegativeButton("取消",null)
-            .setPositiveButton("确定解除",(dialog,which)->{
-                if(!consumeEarlyEnd())return;
-                Calendar now=Calendar.getInstance();
-                SleepSettings.setBypass(prefs,now,SleepSettings.REASON_MANUAL);
-                prefs.edit().putString("sleep_mode",SleepSettings.MODE_OFF)
-                    .putBoolean("sleep_lock_active",false).putString("sleep_state","NORMAL").apply();
-                removeOverlay();
-                host.updateSleepNotification("TODAY_BYPASS_MANUAL","睡眠助手已关闭 · 本次紧急解除");
-                host.disableSleepAssistant();
-            }).show();
-    }
-
     private void requestManualUnlock(){
         int remaining=earlyEndRemaining();
         if(remaining<=0)return;
-        new AlertDialog.Builder(context).setTitle("确定解除睡眠？")
+        AlertDialog dialog=new AlertDialog.Builder(context)
+            .setTitle("确定解除睡眠？")
             .setMessage("解除后将自动关闭睡眠助手，本月还剩 "+remaining+" 次紧急解除机会。")
             .setNegativeButton("取消",null)
-            .setPositiveButton("确定解除",(dialog,which)->{
+            .setPositiveButton("确定解除",null)
+            .create();
+        // 对话框由前台服务发起，必须使用悬浮窗窗口类型，否则部分厂商系统会静默拒绝显示。
+        if(Build.VERSION.SDK_INT>=26&&dialog.getWindow()!=null)
+            dialog.getWindow().setType(WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY);
+        dialog.setOnShowListener(ignored -> {
+            Button confirm=dialog.getButton(AlertDialog.BUTTON_POSITIVE);
+            if(confirm!=null)confirm.setOnClickListener(v->{
                 if(!consumeEarlyEnd())return;
                 Calendar now=Calendar.getInstance();
                 SleepSettings.setBypass(prefs,now,SleepSettings.REASON_MANUAL);
+                // 使用 commit 确保服务停止、用户重新打开应用前，关闭状态和次数已经落盘。
                 prefs.edit().putString("sleep_mode",SleepSettings.MODE_OFF)
-                    .putBoolean("sleep_lock_active",false).putString("sleep_state","NORMAL").apply();
+                    .putBoolean("sleep_lock_active",false).putString("sleep_state","NORMAL")
+                    .putBoolean("sleep_manual_closed",true).commit();
+                dialog.dismiss();
                 removeOverlay();
                 host.updateSleepNotification("TODAY_BYPASS_MANUAL","睡眠助手已关闭 · 本次紧急解除");
                 host.disableSleepAssistant();
-            }).show();
+            });
+        });
+        try{dialog.show();}catch(Exception ignored){
+            // 无法显示系统对话框时保持睡眠锁，不得直接解除或消耗次数。
+        }
     }
 
     public void stop(){removeOverlay();prefs.edit().putBoolean("sleep_lock_active",false).apply();}
@@ -109,7 +106,8 @@ public final class SleepController {
         prefs.edit().putString("sleep_state",state).putBoolean("sleep_lock_active","SLEEP_LOCKED".equals(state)).apply();
         if("PRE_SLEEP_WARNING".equals(state)){
             long left=SleepSettings.nextStart(now,prefs).getTimeInMillis()-now.getTimeInMillis();
-            if(isScreenUsable())showOrUpdateWarning(left);else removeOverlay();
+            // 睡前提醒阶段必须允许用户设置闹钟、保存工作和关闭后台软件，不显示拦截触摸的全屏层。
+            removeOverlay();
             notifyAtMostEachMinute("warning",left,"即将进入睡眠 · "+SleepSettings.formatDuration(left));
         }else if("SLEEP_LOCKED".equals(state)){
             long left=SleepSettings.wakeForCurrentWindow(now,prefs).getTimeInMillis()-now.getTimeInMillis();
@@ -148,7 +146,9 @@ public final class SleepController {
         windows=(WindowManager)context.getSystemService(Context.WINDOW_SERVICE);
         FrameLayout root=new FrameLayout(context);root.setTag(warning?"warning":"locked");
         root.setBackgroundColor(warning?Color.rgb(72,7,13):Color.rgb(10,12,18));
-        root.setClickable(true);root.setFocusable(false);root.setOnTouchListener((v,e)->true);
+        root.setClickable(true);root.setFocusable(false);
+        // 根层只负责挡住普通应用；返回 false 让锁层内的“紧急解除”按钮正常收到触摸事件。
+        root.setOnTouchListener((v,e)->false);
 
         LinearLayout content=new LinearLayout(context);content.setOrientation(LinearLayout.VERTICAL);
         content.setGravity(Gravity.CENTER);content.setPadding(dp(28),dp(48),dp(28),dp(48));
@@ -211,8 +211,7 @@ public final class SleepController {
     private boolean consumeEarlyEnd(){
         int remaining=earlyEndRemaining();
         if(remaining<=0)return false;
-        prefs.edit().putInt("sleep_early_end_count",prefs.getInt("sleep_early_end_count",0)+1).apply();
-        return true;
+        return prefs.edit().putInt("sleep_early_end_count",prefs.getInt("sleep_early_end_count",0)+1).commit();
     }
 
     private TextView label(String value,int sp,int color,boolean bold){

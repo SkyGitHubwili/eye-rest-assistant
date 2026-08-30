@@ -87,7 +87,8 @@ public final class SleepSettings {
 
     public static void setMode(SharedPreferences p,String mode){
         SharedPreferences.Editor edit=p.edit().putString("sleep_mode",mode)
-            .putBoolean("sleep_lock_active",false).putString("sleep_state","NORMAL");
+            .putBoolean("sleep_lock_active",false).putString("sleep_state","NORMAL")
+            .putBoolean("sleep_manual_closed",false);
         if(MODE_TODAY.equals(mode))edit.putString("sleep_mode_date",activePlanKey(Calendar.getInstance(),p));
         if(MODE_OFF.equals(mode))edit.putString("sleep_bypass_date","").putString("sleep_bypass_reason",REASON_NONE);
         edit.apply();
