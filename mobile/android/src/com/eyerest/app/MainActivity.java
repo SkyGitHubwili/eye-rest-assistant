@@ -235,6 +235,8 @@ public class MainActivity extends Activity {
         sleepTimes.addView(labeled("睡眠时间",startPicker),weightedWrap());
         LinearLayout.LayoutParams wakeParams=weightedWrap();wakeParams.setMargins(dp(10),0,0,0);sleepTimes.addView(labeled("起床时间",wakePicker),wakeParams);
         sleepCard.addView(sleepTimes);
+        TextView clockHint=text("时间采用24小时制：下午1点请选择13，凌晨1点请选择01。",11,Color.rgb(126,75,82),false);
+        clockHint.setPadding(0,dp(8),0,0);sleepCard.addView(clockHint);
 
         TextView warningHint=text("睡眠前提醒：提前 3 分钟，以红色倒计时提示保存操作",11,Color.rgb(126,75,82),false);
         warningHint.setPadding(0,dp(14),0,0);sleepCard.addView(warningHint);
@@ -387,6 +389,7 @@ public class MainActivity extends Activity {
             SleepSettings.setMode(prefs,SleepSettings.MODE_OFF);mode=SleepSettings.MODE_OFF;
         }
         String value;
+        String now24=String.format(Locale.CHINA,"当前时间 %02d:%02d",now.get(Calendar.HOUR_OF_DAY),now.get(Calendar.MINUTE));
         if(SleepSettings.MODE_OFF.equals(mode))value="睡眠助手未开启";
         else if(!SleepSettings.valid(prefs))value="睡眠时间不能与起床时间相同";
         else if(SleepSettings.hasBypassForCurrentWindow(now,prefs)){
@@ -400,7 +403,7 @@ public class MainActivity extends Activity {
             value="即将进入睡眠模式 · "+SleepSettings.formatDuration(left);
         }else{
             long left=SleepSettings.nextStart(now,prefs).getTimeInMillis()-now.getTimeInMillis();
-            value="距离睡眠还有 "+SleepSettings.formatDuration(left);
+            value=now24+" · 距离睡眠还有 "+SleepSettings.formatDuration(left);
         }
         sleepStatus.setText(value);
         styleSleepModeButton(sleepOffButton,SleepSettings.MODE_OFF.equals(mode),false);
