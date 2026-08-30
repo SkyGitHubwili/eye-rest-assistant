@@ -49,6 +49,13 @@ public class MainActivity extends Activity {
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
         prefs = getSharedPreferences("settings", MODE_PRIVATE);
+        // Reset the one-time legacy schedule migration. Older builds could
+        // persist accidental values; the intended default is 11:30 PM–08:00 AM.
+        if(!prefs.getBoolean("sleep_time_defaults_v3",false)){
+            prefs.edit().putInt("sleep_start_hour",23).putInt("sleep_start_minute",30)
+                .putInt("sleep_wake_hour",8).putInt("sleep_wake_minute",0)
+                .putBoolean("sleep_time_defaults_v3",true).apply();
+        }
         if(!prefs.contains("keep_running_closed_user_set"))
             prefs.edit().putBoolean("keep_running_closed",false).putBoolean("keep_running_closed_user_set",true).apply();
         if(!prefs.getBoolean("background_policy_v154",false))
@@ -230,15 +237,17 @@ public class MainActivity extends Activity {
         LinearLayout startPicker=row();
         // Keep enough width for the hour label (for example "11 PM").  A
         // weighted spinner was too narrow on phones and rendered it as "0..".
-        startPicker.addView(sleepStartHourSpinner,new LinearLayout.LayoutParams(dp(84),dp(48)));
-        TextView startColon=text(":",18,Color.rgb(92,25,34),true);startColon.setGravity(Gravity.CENTER);startPicker.addView(startColon,new LinearLayout.LayoutParams(dp(20),dp(52)));
-        startPicker.addView(sleepStartMinuteSpinner,weighted());
+        startPicker.addView(sleepStartHourSpinner,new LinearLayout.LayoutParams(dp(68),dp(48)));
+        TextView startColon=text(":",18,Color.rgb(92,25,34),true);startColon.setGravity(Gravity.CENTER);startPicker.addView(startColon,new LinearLayout.LayoutParams(dp(16),dp(52)));
+        startPicker.addView(sleepStartMinuteSpinner,new LinearLayout.LayoutParams(dp(52),dp(48)));
         LinearLayout wakePicker=row();
-        wakePicker.addView(sleepWakeHourSpinner,new LinearLayout.LayoutParams(dp(84),dp(48)));
-        TextView wakeColon=text(":",18,Color.rgb(92,25,34),true);wakeColon.setGravity(Gravity.CENTER);wakePicker.addView(wakeColon,new LinearLayout.LayoutParams(dp(20),dp(52)));
-        wakePicker.addView(sleepWakeMinuteSpinner,weighted());
-        sleepTimes.addView(labeled("睡眠时间",startPicker),weightedWrap());
-        LinearLayout.LayoutParams wakeParams=weightedWrap();wakeParams.setMargins(dp(10),0,0,0);sleepTimes.addView(labeled("起床时间",wakePicker),wakeParams);
+        wakePicker.addView(sleepWakeHourSpinner,new LinearLayout.LayoutParams(dp(68),dp(48)));
+        TextView wakeColon=text(":",18,Color.rgb(92,25,34),true);wakeColon.setGravity(Gravity.CENTER);wakePicker.addView(wakeColon,new LinearLayout.LayoutParams(dp(16),dp(52)));
+        wakePicker.addView(sleepWakeMinuteSpinner,new LinearLayout.LayoutParams(dp(52),dp(48)));
+        startPicker.setGravity(Gravity.CENTER);wakePicker.setGravity(Gravity.CENTER);
+        LinearLayout startBox=blueTimeBox(startPicker),wakeBox=blueTimeBox(wakePicker);
+        sleepTimes.addView(labeled("睡眠时间",startBox),weightedWrap());
+        LinearLayout.LayoutParams wakeParams=weightedWrap();wakeParams.setMargins(dp(10),0,0,0);sleepTimes.addView(labeled("起床时间",wakeBox),wakeParams);
         sleepCard.addView(sleepTimes);
         TextView clockHint=text("小时选项已直接标注 AM/PM，例如下午1:05请选择 01 PM。",11,Color.rgb(126,75,82),false);
         clockHint.setPadding(0,dp(8),0,0);sleepCard.addView(clockHint);
@@ -626,7 +635,7 @@ public class MainActivity extends Activity {
             private View style(View view,boolean dropdown){
                 TextView label=(TextView)view;
                 label.setTextColor(INK);label.setTextSize(14);label.setSingleLine(true);
-                label.setGravity(Gravity.START|Gravity.CENTER_VERTICAL);
+                label.setGravity(Gravity.CENTER);
                 // The selected value needs to fit "11 PM" without ellipsis.
                 label.setPadding(dp(dropdown?10:6),0,dp(dropdown?10:6),0);label.setMinHeight(dp(52));
                 return label;
@@ -638,6 +647,14 @@ public class MainActivity extends Activity {
         s.setAdapter(adapter);s.setBackground(round(Color.rgb(243,246,242),10));s.setPadding(0,0,0,0);return s;
     }
     private LinearLayout labeled(String label,View child){LinearLayout c=column();TextView l=text(label,12,Color.rgb(115,128,121),false);l.setPadding(0,0,0,dp(6));c.addView(l);c.addView(child,new LinearLayout.LayoutParams(-1,dp(52)));return c;}
+    private LinearLayout blueTimeBox(View child){
+        LinearLayout box=row();
+        box.setGravity(Gravity.CENTER);
+        box.setPadding(dp(6),dp(5),dp(6),dp(5));
+        box.setBackground(round(Color.rgb(224,239,250),14));
+        box.addView(child,new LinearLayout.LayoutParams(-1,dp(58)));
+        return box;
+    }
     private LinearLayout.LayoutParams weighted(){return new LinearLayout.LayoutParams(0,dp(48),1);}
     private LinearLayout.LayoutParams weightedWrap(){return new LinearLayout.LayoutParams(0,ViewGroup.LayoutParams.WRAP_CONTENT,1);}
     private GradientDrawable round(int color,int radius){GradientDrawable d=new GradientDrawable();d.setColor(color);d.setCornerRadius(dp(radius));return d;}
