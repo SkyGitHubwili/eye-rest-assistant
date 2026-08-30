@@ -42,6 +42,7 @@ public class MainActivity extends Activity {
     private Button sleepOffButton, sleepTodayButton, sleepDailyButton;
     private Spinner workSpinner, startHourSpinner, endHourSpinner;
     private Spinner sleepStartHourSpinner, sleepStartMinuteSpinner, sleepWakeHourSpinner, sleepWakeMinuteSpinner;
+    private TextView sleepStartPeriod, sleepWakePeriod;
     private final android.os.Handler handler = new android.os.Handler();
     private final int[] workValues = {0, 20, 25, 30};
     private boolean openPermissionPageAfterStartup;
@@ -237,17 +238,20 @@ public class MainActivity extends Activity {
         LinearLayout startPicker=row();
         // Keep enough width for the hour label (for example "11 PM").  A
         // weighted spinner was too narrow on phones and rendered it as "0..".
-        startPicker.addView(sleepStartHourSpinner,new LinearLayout.LayoutParams(dp(68),dp(48)));
-        TextView startColon=text(":",18,Color.rgb(92,25,34),true);startColon.setGravity(Gravity.CENTER);startPicker.addView(startColon,new LinearLayout.LayoutParams(dp(16),dp(52)));
-        startPicker.addView(sleepStartMinuteSpinner,new LinearLayout.LayoutParams(dp(52),dp(48)));
+        startPicker.addView(sleepStartHourSpinner,new LinearLayout.LayoutParams(dp(54),dp(48)));
+        TextView startColon=text(":",18,Color.rgb(92,25,34),true);startColon.setGravity(Gravity.CENTER);startPicker.addView(startColon,new LinearLayout.LayoutParams(dp(14),dp(52)));
+        startPicker.addView(sleepStartMinuteSpinner,new LinearLayout.LayoutParams(dp(44),dp(48)));
+        sleepStartPeriod=periodLabel();startPicker.addView(sleepStartPeriod,new LinearLayout.LayoutParams(dp(30),dp(48)));
         LinearLayout wakePicker=row();
-        wakePicker.addView(sleepWakeHourSpinner,new LinearLayout.LayoutParams(dp(68),dp(48)));
-        TextView wakeColon=text(":",18,Color.rgb(92,25,34),true);wakeColon.setGravity(Gravity.CENTER);wakePicker.addView(wakeColon,new LinearLayout.LayoutParams(dp(16),dp(52)));
-        wakePicker.addView(sleepWakeMinuteSpinner,new LinearLayout.LayoutParams(dp(52),dp(48)));
+        wakePicker.addView(sleepWakeHourSpinner,new LinearLayout.LayoutParams(dp(54),dp(48)));
+        TextView wakeColon=text(":",18,Color.rgb(92,25,34),true);wakeColon.setGravity(Gravity.CENTER);wakePicker.addView(wakeColon,new LinearLayout.LayoutParams(dp(14),dp(52)));
+        wakePicker.addView(sleepWakeMinuteSpinner,new LinearLayout.LayoutParams(dp(44),dp(48)));
+        sleepWakePeriod=periodLabel();wakePicker.addView(sleepWakePeriod,new LinearLayout.LayoutParams(dp(30),dp(48)));
         startPicker.setGravity(Gravity.CENTER);wakePicker.setGravity(Gravity.CENTER);
         LinearLayout startBox=blueTimeBox(startPicker),wakeBox=blueTimeBox(wakePicker);
-        sleepTimes.addView(labeled("睡眠时间",startBox),weightedWrap());
-        LinearLayout.LayoutParams wakeParams=weightedWrap();wakeParams.setMargins(dp(10),0,0,0);sleepTimes.addView(labeled("起床时间",wakeBox),wakeParams);
+        sleepTimes.addView(sleepLabeled("睡眠时间",startBox),weightedWrap());
+        LinearLayout.LayoutParams wakeParams=weightedWrap();wakeParams.setMargins(dp(10),0,0,0);sleepTimes.addView(sleepLabeled("起床时间",wakeBox),wakeParams);
+        updateSleepPeriodLabels();
         sleepCard.addView(sleepTimes);
         TextView clockHint=text("小时选项已直接标注 AM/PM，例如下午1:05请选择 01 PM。",11,Color.rgb(126,75,82),false);
         clockHint.setPadding(0,dp(8),0,0);sleepCard.addView(clockHint);
@@ -264,7 +268,7 @@ public class MainActivity extends Activity {
 
         android.widget.AdapterView.OnItemSelectedListener saveSleepTime=new android.widget.AdapterView.OnItemSelectedListener(){
             public void onNothingSelected(android.widget.AdapterView<?> p){}
-            public void onItemSelected(android.widget.AdapterView<?> p,View v,int pos,long id){saveSleepTimes();}
+            public void onItemSelected(android.widget.AdapterView<?> p,View v,int pos,long id){saveSleepTimes();updateSleepPeriodLabels();}
         };
         sleepStartHourSpinner.setOnItemSelectedListener(saveSleepTime);sleepStartMinuteSpinner.setOnItemSelectedListener(saveSleepTime);
         sleepWakeHourSpinner.setOnItemSelectedListener(saveSleepTime);sleepWakeMinuteSpinner.setOnItemSelectedListener(saveSleepTime);
@@ -422,6 +426,7 @@ public class MainActivity extends Activity {
             value=now24+" · 距离睡眠还有 "+SleepSettings.formatDuration(left);
         }
         sleepStatus.setText(value);
+        sleepStatus.setTextColor(SleepSettings.MODE_OFF.equals(mode)?Color.rgb(115,128,121):GREEN);
         styleSleepModeButton(sleepOffButton,SleepSettings.MODE_OFF.equals(mode),false);
         styleSleepModeButton(sleepTodayButton,SleepSettings.MODE_TODAY.equals(mode),true);
         styleSleepModeButton(sleepDailyButton,SleepSettings.MODE_DAILY.equals(mode),true);
@@ -636,6 +641,10 @@ public class MainActivity extends Activity {
                 TextView label=(TextView)view;
                 label.setTextColor(INK);label.setTextSize(14);label.setSingleLine(true);
                 label.setGravity(Gravity.CENTER);
+                if(!dropdown){
+                    String shown=label.getText().toString().replace(" AM","").replace(" PM","");
+                    label.setText(shown);
+                }
                 // The selected value needs to fit "11 PM" without ellipsis.
                 label.setPadding(dp(dropdown?10:6),0,dp(dropdown?10:6),0);label.setMinHeight(dp(52));
                 return label;
@@ -647,6 +656,14 @@ public class MainActivity extends Activity {
         s.setAdapter(adapter);s.setBackground(round(Color.rgb(243,246,242),10));s.setPadding(0,0,0,0);return s;
     }
     private LinearLayout labeled(String label,View child){LinearLayout c=column();TextView l=text(label,12,Color.rgb(115,128,121),false);l.setPadding(0,0,0,dp(6));c.addView(l);c.addView(child,new LinearLayout.LayoutParams(-1,dp(52)));return c;}
+    private LinearLayout sleepLabeled(String label,View child){LinearLayout c=column();TextView l=text(label,12,GREEN,true);l.setPadding(0,0,0,dp(6));c.addView(l);c.addView(child,new LinearLayout.LayoutParams(-1,dp(52)));return c;}
+    private TextView periodLabel(){TextView v=text("PM",13,GREEN,true);v.setGravity(Gravity.CENTER);return v;}
+    private void updateSleepPeriodLabels(){
+        if(sleepStartPeriod!=null&&sleepStartHourSpinner!=null)
+            sleepStartPeriod.setText(sleepStartHourSpinner.getSelectedItemPosition()<12?"AM":"PM");
+        if(sleepWakePeriod!=null&&sleepWakeHourSpinner!=null)
+            sleepWakePeriod.setText(sleepWakeHourSpinner.getSelectedItemPosition()<12?"AM":"PM");
+    }
     private LinearLayout blueTimeBox(View child){
         LinearLayout box=row();
         box.setGravity(Gravity.CENTER);
