@@ -31,7 +31,7 @@ import java.util.Locale;
 import java.util.Calendar;
 
 public class MainActivity extends Activity {
-    private static final int PICK_IMAGE = 41;
+    private static final int PICK_IMAGE = 41, PICK_SLEEP_IMAGE = 42;
     private static final int GREEN = Color.rgb(45, 122, 89);
     private static final int RED = Color.rgb(205, 61, 61);
     private static final int INK = Color.rgb(24, 52, 42);
@@ -285,7 +285,7 @@ public class MainActivity extends Activity {
         sleepWakeHourSpinner.setOnItemSelectedListener(saveSleepTime);sleepWakeMinuteSpinner.setOnItemSelectedListener(saveSleepTime);
 
         LinearLayout imageCard = card();
-        imageCard.addView(text("休息画面", 18, INK, true));
+        imageCard.addView(text("护眼模式休息画面", 18, INK, true));
         imageStatus = text(new File(getFilesDir(),"break_image").exists()?"已设置自己的图片":"自然渐变背景", 12, Color.rgb(115,128,121), false);
         imageCard.addView(imageStatus);
         FrameLayout previewFrame=new FrameLayout(this);
@@ -311,6 +311,26 @@ public class MainActivity extends Activity {
         imageActions.addView(restore,restoreP);restore.setOnClickListener(v -> restoreDefaultImage());
         imageCard.addView(imageActions);
         root.addView(imageCard, cardGap);
+
+        LinearLayout sleepImageCard=card();
+        sleepImageCard.addView(text("睡眠倒计时提醒画面",18,INK,true));
+        TextView sleepImageStatus=text(new File(getFilesDir(),"sleep_warning_image").exists()?"已设置自己的图片":"默认提醒画面",12,Color.rgb(115,128,121),false);
+        sleepImageCard.addView(sleepImageStatus);
+        FrameLayout sleepPreviewFrame=new FrameLayout(this);
+        sleepPreviewFrame.setBackground(round(Color.rgb(238,242,238),16));sleepPreviewFrame.setClipToOutline(true);
+        ImageView sleepPreview=new ImageView(this);sleepPreview.setScaleType(ImageView.ScaleType.CENTER_CROP);
+        File sleepCustom=new File(getFilesDir(),"sleep_warning_image");
+        if(sleepCustom.exists())sleepPreview.setImageBitmap(BitmapFactory.decodeFile(sleepCustom.getAbsolutePath()));
+        else sleepPreview.setBackground(new GradientDrawable(GradientDrawable.Orientation.TL_BR,new int[]{Color.rgb(72,7,13),Color.rgb(137,35,52)}));
+        sleepPreviewFrame.addView(sleepPreview,new FrameLayout.LayoutParams(-1,-1));
+        TextView sleepPreviewTitle=text("即将进入睡眠 · 倒计时",18,Color.WHITE,true);sleepPreviewTitle.setGravity(Gravity.CENTER);
+        sleepPreviewFrame.addView(sleepPreviewTitle,new FrameLayout.LayoutParams(-1,-1));
+        LinearLayout.LayoutParams sleepPreviewParams=new LinearLayout.LayoutParams(-1,dp(150));sleepPreviewParams.setMargins(0,dp(14),0,0);sleepImageCard.addView(sleepPreviewFrame,sleepPreviewParams);
+        LinearLayout sleepImageActions=row();sleepImageActions.setPadding(0,dp(14),0,0);
+        Button chooseSleep=button("选择自己的图片",Color.rgb(234,240,235),INK);sleepImageActions.addView(chooseSleep,weighted());chooseSleep.setOnClickListener(v->chooseSleepImage());
+        Button restoreSleep=button("恢复默认画面",Color.rgb(234,240,235),INK);LinearLayout.LayoutParams restoreSleepP=weighted();restoreSleepP.setMargins(dp(10),0,0,0);sleepImageActions.addView(restoreSleep,restoreSleepP);
+        restoreSleep.setOnClickListener(v->{File f=new File(getFilesDir(),"sleep_warning_image");if(f.exists())f.delete();sleepImageStatus.setText("默认提醒画面");sleepPreview.setImageDrawable(null);sleepPreview.setBackground(new GradientDrawable(GradientDrawable.Orientation.TL_BR,new int[]{Color.rgb(72,7,13),Color.rgb(137,35,52)}));});
+        sleepImageCard.addView(sleepImageActions);root.addView(sleepImageCard,cardGap);
 
         LinearLayout permissionCard = card();
         permissionCard.addView(text("全屏提醒权限", 18, INK, true));
@@ -469,6 +489,10 @@ public class MainActivity extends Activity {
         Intent i = new Intent(Intent.ACTION_OPEN_DOCUMENT).setType("image/*").addCategory(Intent.CATEGORY_OPENABLE);
         startActivityForResult(i, PICK_IMAGE);
     }
+    private void chooseSleepImage() {
+        Intent i = new Intent(Intent.ACTION_OPEN_DOCUMENT).setType("image/*").addCategory(Intent.CATEGORY_OPENABLE);
+        startActivityForResult(i, PICK_SLEEP_IMAGE);
+    }
     private void restoreDefaultImage() {
         File image=new File(getFilesDir(),"break_image");
         if(image.exists()&&!image.delete()){
@@ -480,11 +504,12 @@ public class MainActivity extends Activity {
     }
     @Override protected void onActivityResult(int request, int result, Intent data) {
         super.onActivityResult(request,result,data);
-        if (request!=PICK_IMAGE || result!=RESULT_OK || data==null) return;
-        try (InputStream in=getContentResolver().openInputStream(data.getData()); FileOutputStream out=new FileOutputStream(new File(getFilesDir(),"break_image"))) {
+        if ((request!=PICK_IMAGE&&request!=PICK_SLEEP_IMAGE) || result!=RESULT_OK || data==null) return;
+        String targetName=request==PICK_SLEEP_IMAGE?"sleep_warning_image":"break_image";
+        try (InputStream in=getContentResolver().openInputStream(data.getData()); FileOutputStream out=new FileOutputStream(new File(getFilesDir(),targetName))) {
             byte[] b=new byte[8192]; int n; while((n=in.read(b))>0) out.write(b,0,n);
-            imageStatus.setText("已设置自己的图片");
-            refreshBreakPreview();
+            if(request==PICK_IMAGE){imageStatus.setText("已设置自己的图片");refreshBreakPreview();}
+            Toast.makeText(this,request==PICK_SLEEP_IMAGE?"睡眠提醒图片已更新":"护眼休息图片已更新",Toast.LENGTH_SHORT).show();
         } catch(Exception e) { Toast.makeText(this,"图片设置失败",Toast.LENGTH_SHORT).show(); }
     }
     private void refreshBreakPreview(){

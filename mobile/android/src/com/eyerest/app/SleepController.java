@@ -163,7 +163,7 @@ public final class SleepController {
         LinearLayout content=new LinearLayout(context);content.setOrientation(LinearLayout.VERTICAL);
         content.setGravity(Gravity.CENTER);content.setPadding(dp(28),warning?dp(20):dp(48),dp(28),warning?dp(20):dp(48));
         if(warning){
-            File imageFile=new File(context.getFilesDir(),"break_image");
+            File imageFile=new File(context.getFilesDir(),"sleep_warning_image");
             if(imageFile.exists()){
                 ImageView image=new ImageView(context);image.setScaleType(ImageView.ScaleType.CENTER_CROP);
                 image.setImageBitmap(BitmapFactory.decodeFile(imageFile.getAbsolutePath()));
