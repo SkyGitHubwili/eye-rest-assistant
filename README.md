@@ -1,54 +1,69 @@
-# 护眼助手
+# 护眼睡眠助手
 
-一个简洁的 Windows + Android 护眼定时器。工作计时结束后，会显示全屏休息画面。
+Windows + Android 本地护眼工具；Android 8.0+ 还包含睡眠和健康使用模块。健康使用数据来自 Android `UsageStatsManager` / `UsageEvents`，不会展示虚构统计。
 
-## 功能
+## 护眼功能
 
-- 20/30/45/60 分钟定时（另有 1 分钟测试选项）
-- 20 秒至 5 分钟休息时长
-- 自选 JPG、PNG、BMP 或 GIF 休息图片
-- 多显示器全屏覆盖
-- 暂停、重置、立即休息、提前结束
-- 设置自动保存到 `F:\护眼助手`
-- Android 后台计时及“显示在其他应用上层”全屏提醒
-- Windows 与 Android 统一护眼主题图标
-- Windows 开机自启、Android 开机/亮屏自动工作
-- 可设置每日工作时间段，睡眠时段自动暂停
-- 提前结束休息每月最多 3 次，用完后自动锁定按钮
-- 界面内置 20-20-20 护眼法说明
+- Windows/Android 护眼计时、暂停、重置、立即休息和全屏休息画面
+- 自定义休息图片、每日工作时段和后台恢复
+- 提前结束休息每月最多 3 次
 - Android 支持关闭、仅当天手动护眼、每日自动护眼三种模式
-- Android 暂停后保留剩余时间，重新进入应用不会擅自启动
 
-## 睡眠助手
+## 健康使用 V1
 
-- 睡眠计划支持“关闭 / 今日 / 每天”三种模式，按钮会以绿色标识已启用模式
-- 可设置睡眠与起床时间，支持跨午夜计算，并在睡前 3 分钟显示红色倒计时
-- 睡眠期间保留状态栏和通知栏，可下滑查看消息；通知栏倒计时会实时更新
-- 来电或设备重启可自动解除当晚睡眠锁；睡眠界面支持每月最多 3 次紧急解除
-- 紧急解除需确认，确认后自动关闭睡眠助手
-- Android 睡眠助手最低支持 Android 8.0，覆盖屏幕权限用于全屏睡眠提醒
+- 固定底部三页面导航，重建后保留当前页面
+- 今日/昨日总使用时间、每日目标与剩余时间
+- Top 5 App 排行、真实图标、名称、时长和横向柱形图
+- 单 App 今日/昨日、打开次数、平均每次和最近 7 天趋势
+- 全部数据页、7 天日均/最多/最少及与上周比较
+- 最长/当前连续使用估算，30/45/60/90 分钟低频通知提醒
+- 本地透明健康指数，不包含医疗诊断
+- 为 V2 单 App 限时预留 `AppLimit` 数据模型，不在 V1 强制锁 App
 
-## 开发运行
+首次进入「健康使用」需按提示开启系统的“使用情况访问权限”。权限关闭或系统无数据时，页面只显示权限/空状态。
+
+## 睡眠功能
+
+- 关闭、今日、每天三种模式
+- 精确到分钟的睡眠/起床时间，支持跨午夜
+- 睡前 3 分钟红色真实时间倒计时
+- 到点使用全屏 `TYPE_APPLICATION_OVERLAY` 阻挡普通应用操作
+- 状态栏保留，可查看通知；不修改媒体、通知、闹钟和通话音量
+- 来电立即移除睡眠层，并跳过当前这一晚
+- 睡眠期间重启后跳过当前这一晚；每日模式下一晚自动恢复
+- 熄屏移除 Overlay，解锁后若仍在睡眠时段则恢复
+- 前台服务、定时恢复、时间及时区变化重新计算
+
+## 使用
+
+首次启动请允许：
+
+1. 显示在其他应用上层（强制提醒必需）
+2. 通知权限（前台服务状态）
+3. 电话状态权限（仅用于检测响铃并解除当晚睡眠锁）
+4. 厂商系统中的自启动与后台运行权限
+5. 使用情况访问权限（仅健康使用统计需要）
+
+最低 Android 8.0。Android 不允许普通应用获得不可退出的系统级设备锁；用户强制停止应用或撤销悬浮窗权限后，系统会终止锁定，这是避免永久锁死的安全边界。
+
+## Windows 开发与发布
 
 ```powershell
 dotnet run
-```
-
-## Windows 单文件发布
-
-```powershell
 dotnet restore -r win-x64 --configfile .\NuGet.Config
 dotnet publish -c Release -r win-x64 --self-contained true --no-restore -p:PublishSingleFile=true -p:EnableCompressionInSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -o F:\EyeRestBuild\windows
 ```
 
-生成的 `护眼助手.exe` 是自带 .NET 运行环境的单文件，可直接双击运行。
-
-## Android 发布
-
-Android 8.0 及以上系统可用。运行以下命令生成已签名 APK：
+## Android 构建
 
 ```powershell
 .\mobile\android\build.ps1
 ```
 
-APK 输出到 `F:\SleepAssistantRelease\SleepAssistant-Android.apk`。首次使用请在应用中开启“显示在其他应用上层”，否则休息时间到达时只能显示通知。
+输出：`F:\SleepAssistantRelease\SleepAssistant-Android.apk`
+
+逻辑测试：
+
+```powershell
+.\tools\run-tests.ps1
+```

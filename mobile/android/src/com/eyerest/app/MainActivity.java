@@ -32,17 +32,24 @@ import java.util.Calendar;
 
 public class MainActivity extends Activity {
     private static final int PICK_IMAGE = 41, PICK_SLEEP_IMAGE = 42;
+    public static final String EXTRA_PAGE = "page";
+    public static final String PAGE_HEALTH_NAME = "health";
+    private static final int PAGE_EYE = 0, PAGE_SLEEP = 1, PAGE_HEALTH = 2;
     private static final int GREEN = Color.rgb(45, 122, 89);
     private static final int RED = Color.rgb(205, 61, 61);
     private static final int INK = Color.rgb(24, 52, 42);
     private SharedPreferences prefs;
-    private TextView countdown, status, imageStatus, overlayStatus, modeStatus, breakDuration, sleepStatus;
+    private TextView countdown, status, imageStatus, overlayStatus, sleepOverlayStatus, modeStatus, breakDuration, sleepStatus;
     private ImageView breakPreview;
     private Button toggle, resetButton, breakNowButton, manualModeButton, autoModeButton, offModeButton;
     private Button sleepOffButton, sleepTodayButton, sleepDailyButton;
     private Spinner workSpinner, startHourSpinner, startMinuteSpinner, endHourSpinner, endMinuteSpinner;
     private Spinner sleepStartHourSpinner, sleepStartMinuteSpinner, sleepWakeHourSpinner, sleepWakeMinuteSpinner;
     private TextView sleepStartPeriod, sleepWakePeriod;
+    private View eyePage, sleepPage;
+    private HealthUsageView healthPage;
+    private Button eyeNavButton, sleepNavButton, healthNavButton;
+    private int currentPage = PAGE_EYE;
     private final android.os.Handler handler = new android.os.Handler();
     private final int[] workValues = {0, 20, 25, 30};
     private boolean openPermissionPageAfterStartup;
@@ -50,6 +57,9 @@ public class MainActivity extends Activity {
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
         prefs = getSharedPreferences("settings", MODE_PRIVATE);
+        if(state!=null)currentPage=state.getInt("current_page",PAGE_EYE);
+        else if(PAGE_HEALTH_NAME.equals(getIntent().getStringExtra(EXTRA_PAGE)))currentPage=PAGE_HEALTH;
+        else currentPage=Math.max(PAGE_EYE,Math.min(PAGE_HEALTH,prefs.getInt("current_page",PAGE_EYE)));
         // Reset the one-time legacy schedule migration. Older builds could
         // persist accidental values; the intended default is 11:30 PM–08:00 AM.
         if(!prefs.getBoolean("sleep_time_defaults_v3",false)){
@@ -78,19 +88,48 @@ public class MainActivity extends Activity {
     }
 
     private View buildUi() {
+        LinearLayout shell=column();
+        shell.setBackgroundColor(Color.rgb(245,247,242));
+        shell.setOnApplyWindowInsetsListener((view,insets)->{
+            view.setPadding(insets.getSystemWindowInsetLeft(),insets.getSystemWindowInsetTop(),
+                insets.getSystemWindowInsetRight(),insets.getSystemWindowInsetBottom());
+            return insets;
+        });
+        FrameLayout pages=new FrameLayout(this);
+        shell.addView(pages,new LinearLayout.LayoutParams(-1,0,1));
+
         ScrollView scroll = new ScrollView(this);
         scroll.setFillViewport(true);
         scroll.setClipToPadding(true);
         scroll.setBackgroundColor(Color.rgb(245,247,242));
-        scroll.setOnApplyWindowInsetsListener((view, insets) -> {
-            view.setPadding(insets.getSystemWindowInsetLeft(), insets.getSystemWindowInsetTop(),
-                insets.getSystemWindowInsetRight(), insets.getSystemWindowInsetBottom());
-            return insets;
-        });
         LinearLayout root = column();
         root.setPadding(dp(20), dp(16), dp(20), dp(24));
         root.setBackgroundColor(Color.rgb(245,247,242));
         scroll.addView(root);
+        eyePage=scroll;
+        pages.addView(eyePage,new FrameLayout.LayoutParams(-1,-1));
+
+        ScrollView sleepScroll=new ScrollView(this);
+        sleepScroll.setFillViewport(true);sleepScroll.setClipToPadding(true);
+        sleepScroll.setBackgroundColor(Color.rgb(245,247,242));
+        LinearLayout sleepRoot=column();
+        sleepRoot.setPadding(dp(20),dp(16),dp(20),dp(24));
+        sleepRoot.setBackgroundColor(Color.rgb(245,247,242));
+        sleepScroll.addView(sleepRoot);
+        sleepPage=sleepScroll;
+        pages.addView(sleepPage,new FrameLayout.LayoutParams(-1,-1));
+
+        healthPage=new HealthUsageView(this);
+        pages.addView(healthPage,new FrameLayout.LayoutParams(-1,-1));
+
+        LinearLayout sleepHeader=row();
+        TextView moon=text("☾",42,Color.rgb(92,25,34),false);moon.setGravity(Gravity.CENTER);
+        sleepHeader.addView(moon,new LinearLayout.LayoutParams(dp(54),dp(54)));
+        LinearLayout sleepTitles=column();sleepTitles.setPadding(dp(12),0,0,0);
+        sleepTitles.addView(text("睡眠",25,INK,true));
+        sleepTitles.addView(text("按计划放下手机，安心进入休息",13,Color.rgb(115,128,121),false));
+        sleepHeader.addView(sleepTitles,new LinearLayout.LayoutParams(0,-2,1));
+        sleepRoot.addView(sleepHeader);
 
         LinearLayout header = row();
         ImageView logo = new ImageView(this);
@@ -98,8 +137,8 @@ public class MainActivity extends Activity {
         header.addView(logo, new LinearLayout.LayoutParams(dp(54), dp(54)));
         LinearLayout titles = column();
         titles.setPadding(dp(12), 0, 0, 0);
-        titles.addView(text("护眼与睡眠助手", 25, INK, true));
-        titles.addView(text("定时放松眼睛，也帮助你按时入睡", 13, Color.rgb(115,128,121), false));
+        titles.addView(text("护眼", 25, INK, true));
+        titles.addView(text("定时放松眼睛，保持舒适节奏", 13, Color.rgb(115,128,121), false));
         header.addView(titles, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
         status = text("专注中", 12, GREEN, true);
         status.setGravity(Gravity.CENTER);
@@ -275,7 +314,7 @@ public class MainActivity extends Activity {
         manualUnlockHint.setLineSpacing(dp(3),1f);manualUnlockHint.setPadding(0,dp(4),0,dp(10));sleepCard.addView(manualUnlockHint);
         TextView bypassHint=text("来电会立即解除当晚睡眠锁；睡眠中重启后，当晚也不会再次锁定。",11,Color.rgb(126,75,82),false);
         bypassHint.setLineSpacing(dp(3),1f);bypassHint.setPadding(0,dp(4),0,dp(4));sleepCard.addView(bypassHint);
-        root.addView(sleepCard,cardGap);
+        sleepRoot.addView(sleepCard,cardGap);
 
         android.widget.AdapterView.OnItemSelectedListener saveSleepTime=new android.widget.AdapterView.OnItemSelectedListener(){
             public void onNothingSelected(android.widget.AdapterView<?> p){}
@@ -345,7 +384,7 @@ public class MainActivity extends Activity {
             public void onStartTrackingTouch(SeekBar bar){}
             public void onStopTrackingTouch(SeekBar bar){}
         });
-        root.addView(sleepImageCard,cardGap);
+        sleepRoot.addView(sleepImageCard,cardGap);
 
         LinearLayout permissionCard = card();
         permissionCard.addView(text("全屏提醒权限", 18, INK, true));
@@ -356,6 +395,14 @@ public class MainActivity extends Activity {
         permissionCard.addView(permission, pp);
         permission.setOnClickListener(v -> explainOverlayPermission());
         root.addView(permissionCard, cardGap);
+
+        LinearLayout sleepPermissionCard=card();
+        sleepPermissionCard.addView(text("全屏睡眠提醒权限",18,INK,true));
+        sleepOverlayStatus=text("",12,Color.rgb(115,128,121),false);sleepPermissionCard.addView(sleepOverlayStatus);
+        Button sleepPermission=button("开启覆盖屏幕权限",GREEN,Color.WHITE);
+        LinearLayout.LayoutParams spp=new LinearLayout.LayoutParams(-1,dp(48));spp.setMargins(0,dp(14),0,0);
+        sleepPermissionCard.addView(sleepPermission,spp);sleepPermission.setOnClickListener(v->explainOverlayPermission());
+        sleepRoot.addView(sleepPermissionCard,cardGap);
         updateOverlayStatus();
 
         updateModeButtons();
@@ -365,7 +412,49 @@ public class MainActivity extends Activity {
             && (!prefs.getBoolean("user_paused",false) || prefs.getBoolean("running",false)))
             service(EyeRestService.ACTION_REEVALUATE);
         if(!SleepSettings.MODE_OFF.equals(prefs.getString("sleep_mode",SleepSettings.MODE_OFF)))startSleepService();
-        return scroll;
+        LinearLayout navigation=row();
+        navigation.setGravity(Gravity.CENTER);
+        navigation.setPadding(dp(10),dp(7),dp(10),dp(7));
+        navigation.setBackgroundColor(Color.WHITE);
+        navigation.setElevation(dp(10));
+        eyeNavButton=navButton("◉\n护眼",PAGE_EYE);
+        sleepNavButton=navButton("☾\n睡眠",PAGE_SLEEP);
+        healthNavButton=navButton("▣\n健康使用",PAGE_HEALTH);
+        navigation.addView(eyeNavButton,new LinearLayout.LayoutParams(0,dp(58),1));
+        navigation.addView(sleepNavButton,new LinearLayout.LayoutParams(0,dp(58),1));
+        navigation.addView(healthNavButton,new LinearLayout.LayoutParams(0,dp(58),1));
+        shell.addView(navigation,new LinearLayout.LayoutParams(-1,dp(72)));
+        showPage(currentPage,false);
+        return shell;
+    }
+
+    private Button navButton(String label,int page){
+        Button button=button(label,Color.TRANSPARENT,Color.rgb(137,148,142));
+        button.setTextSize(12);button.setGravity(Gravity.CENTER);button.setPadding(0,0,0,0);
+        button.setOnClickListener(v->showPage(page,true));
+        return button;
+    }
+    private void showPage(int page,boolean refreshHealth){
+        int previous=currentPage;
+        currentPage=Math.max(PAGE_EYE,Math.min(PAGE_HEALTH,page));
+        prefs.edit().putInt("current_page",currentPage).apply();
+        if(eyePage!=null)eyePage.setVisibility(currentPage==PAGE_EYE?View.VISIBLE:View.GONE);
+        if(sleepPage!=null)sleepPage.setVisibility(currentPage==PAGE_SLEEP?View.VISIBLE:View.GONE);
+        if(healthPage!=null)healthPage.setVisibility(currentPage==PAGE_HEALTH?View.VISIBLE:View.GONE);
+        styleNavButton(eyeNavButton,currentPage==PAGE_EYE);
+        styleNavButton(sleepNavButton,currentPage==PAGE_SLEEP);
+        styleNavButton(healthNavButton,currentPage==PAGE_HEALTH);
+        if(previous!=currentPage){
+            View active=currentPage==PAGE_EYE?eyePage:currentPage==PAGE_SLEEP?sleepPage:healthPage;
+            if(active!=null){active.setAlpha(0f);active.animate().alpha(1f).setDuration(160L).start();}
+        }
+        if(currentPage==PAGE_HEALTH&&healthPage!=null&&(refreshHealth||!healthPage.hasLoaded()))healthPage.refreshData();
+    }
+    private void styleNavButton(Button button,boolean selected){
+        if(button==null)return;
+        button.setTextColor(selected?GREEN:Color.rgb(137,148,142));
+        button.setTypeface(Typeface.DEFAULT,selected?Typeface.BOLD:Typeface.NORMAL);
+        button.setBackground(round(selected?Color.rgb(229,241,232):Color.TRANSPARENT,14));
     }
 
     private void toggleTimer() {
@@ -649,11 +738,14 @@ public class MainActivity extends Activity {
         view.setText(styled);
     }
     private void updateOverlayStatus() {
-        if (overlayStatus!=null) overlayStatus.setText(Settings.canDrawOverlays(this)?"已开启：到点可覆盖其他应用":"未开启：请授权后使用全屏提醒");
+        String value=Settings.canDrawOverlays(this)?"已开启：到点可覆盖其他应用":"未开启：请授权后使用全屏提醒";
+        if(overlayStatus!=null)overlayStatus.setText(value);
+        if(sleepOverlayStatus!=null)sleepOverlayStatus.setText(value);
     }
     @Override protected void onResume() {
         super.onResume();
         updateOverlayStatus();
+        if(currentPage==PAGE_HEALTH&&healthPage!=null)healthPage.refreshData();
         if(openPermissionPageAfterStartup){
             openPermissionPageAfterStartup=false;
             handler.postDelayed(this::openAppPermissionSettings,300);
@@ -668,7 +760,21 @@ public class MainActivity extends Activity {
     @Override protected void onDestroy() {
         if(isFinishing()&&!isChangingConfigurations()&&!prefs.getBoolean("keep_running_closed",false))
             service(EyeRestService.ACTION_APP_CLOSED);
-        handler.removeCallbacks(ticker); super.onDestroy();
+        handler.removeCallbacks(ticker);
+        if(healthPage!=null)healthPage.destroy();
+        super.onDestroy();
+    }
+    @Override protected void onSaveInstanceState(Bundle outState){
+        outState.putInt("current_page",currentPage);
+        super.onSaveInstanceState(outState);
+    }
+    @Override protected void onNewIntent(Intent intent){
+        super.onNewIntent(intent);setIntent(intent);
+        if(PAGE_HEALTH_NAME.equals(intent.getStringExtra(EXTRA_PAGE)))showPage(PAGE_HEALTH,true);
+    }
+    @Override public void onBackPressed(){
+        if(currentPage!=PAGE_EYE){showPage(PAGE_EYE,false);return;}
+        super.onBackPressed();
     }
     private void requestNotificationPermission() {
         java.util.ArrayList<String> missing=new java.util.ArrayList<>();

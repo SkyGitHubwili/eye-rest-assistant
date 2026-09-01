@@ -13,6 +13,7 @@ public class BootReceiver extends BroadcastReceiver {
         android.content.SharedPreferences prefs=context.getSharedPreferences("settings", Context.MODE_PRIVATE);
         String action=intent==null?"":intent.getAction();
         boolean realBoot=Intent.ACTION_BOOT_COMPLETED.equals(action)||"android.intent.action.QUICKBOOT_POWERON".equals(action);
+        if(realBoot)HealthReminderScheduler.schedule(context);
         java.util.Calendar calendar=java.util.Calendar.getInstance();
         if(realBoot&&SleepSettings.isEnabledForPlan(calendar,prefs)
             &&SleepSettings.isInSleepWindow(calendar,prefs)&&!SleepSettings.hasBypassForCurrentWindow(calendar,prefs))
