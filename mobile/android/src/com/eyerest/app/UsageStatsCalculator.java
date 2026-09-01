@@ -103,6 +103,13 @@ public final class UsageStatsCalculator {
                 launchCount, packageLaunchesAvailable, info.installed, info.userFacing,
                 value(lastUsed, packageName)));
         }
+        // Some vendor ROMs return overlapping UsageStats buckets for multiple
+        // activities. Summing those buckets can falsely produce a full 24-hour
+        // day. When that happens, use the union of real foreground intervals,
+        // which cannot exceed the elapsed day and matches screen-on usage.
+        if (total > rangeLength && eventsAvailable && !intervals.isEmpty()) {
+            total = unionDuration(intervals, dayStartMillis, end);
+        }
         total = Math.min(rangeLength, total);
         sortApps(apps);
 
@@ -467,5 +474,27 @@ public final class UsageStatsCalculator {
     private static int safeIntAdd(int left, int right) {
         if (right > 0 && left > Integer.MAX_VALUE - right) return Integer.MAX_VALUE;
         return left + right;
+    }
+
+    private static long unionDuration(List<HealthModels.UsageInterval> intervals,
+                                      long rangeStart, long rangeEnd) {
+        List<long[]> spans = new ArrayList<long[]>();
+        for (HealthModels.UsageInterval interval : intervals) {
+            if (interval == null) continue;
+            long start = Math.max(rangeStart, interval.startMillis);
+            long end = Math.min(rangeEnd, interval.endMillis);
+            if (end > start) spans.add(new long[]{start, end});
+        }
+        if (spans.isEmpty()) return 0L;
+        Collections.sort(spans, new Comparator<long[]>() {
+            @Override public int compare(long[] a, long[] b) { return Long.compare(a[0], b[0]); }
+        });
+        long total = 0L, start = spans.get(0)[0], end = spans.get(0)[1];
+        for (int i = 1; i < spans.size(); i++) {
+            long[] next = spans.get(i);
+            if (next[0] <= end) end = Math.max(end, next[1]);
+            else { total = saturatingAdd(total, end - start); start = next[0]; end = next[1]; }
+        }
+        return saturatingAdd(total, end - start);
     }
 }
