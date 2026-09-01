@@ -44,7 +44,10 @@ public final class HealthUsageView extends ScrollView {
     private HealthModels.HealthSnapshot snapshot;
     private boolean loaded;
     private boolean loading;
-    private boolean limitDialogOpen;
+    /** Prevent an async usage refresh from replacing controls below an open dialog. */
+    private boolean dialogOpen;
+    /** Keep the first interactive screen stable while the cold-start query completes. */
+    private boolean initialInteractionGrace;
     private HealthModels.HealthSnapshot deferredSnapshot;
     private float pullStartY=-1f;
 
@@ -80,6 +83,17 @@ public final class HealthUsageView extends ScrollView {
         HealthReminderScheduler.schedule(activity);
         final boolean firstLoad=snapshot==null;
         loading=true;
+        if(firstLoad){
+            initialInteractionGrace=true;
+            postDelayed(()->{
+                initialInteractionGrace=false;
+                if(!dialogOpen&&deferredSnapshot!=null){
+                    HealthModels.HealthSnapshot pending=deferredSnapshot;
+                    deferredSnapshot=null;
+                    showSnapshot(pending);
+                }
+            },1600L);
+        }
         // Keep the last completed snapshot visible while the next query runs.
         // Rebuilding the whole page here caused a visible flash whenever the
         // user switched between the Sleep and Health tabs.
@@ -87,7 +101,7 @@ public final class HealthUsageView extends ScrollView {
         final Runnable query=()->manager.refresh(new HealthUsageManager.Callback<HealthModels.HealthSnapshot>(){
             @Override public void onSuccess(HealthModels.HealthSnapshot value){
                 loading=false;loaded=true;snapshot=value;
-                if(limitDialogOpen) deferredSnapshot=value; else showSnapshot(value);
+                if(dialogOpen||initialInteractionGrace) deferredSnapshot=value; else showSnapshot(value);
             }
             @Override public void onError(Throwable error){
                 loading=false;loaded=true;
@@ -201,7 +215,12 @@ public final class HealthUsageView extends ScrollView {
         panel.addView(progress,new LinearLayout.LayoutParams(-1,dp(12)));
         String remaining=used<=goalMillis?"还剩 "+duration(goalMillis-used):"已超过目标 "+duration(used-goalMillis);
         TextView remainingView=text(remaining,13,used<=goalMillis?MUTED:Color.rgb(184,74,53),false);remainingView.setPadding(0,dp(9),0,0);panel.addView(remainingView);
-        edit.setOnClickListener(v->showGoalDialog());addCard(panel);
+        View.OnClickListener openGoal=v->showGoalDialog();
+        edit.setOnClickListener(openGoal);
+        // The whole heading is an intentionally forgiving touch target on the
+        // first frame after a cold start, while the visible button remains.
+        heading.setOnClickListener(openGoal);
+        addCard(panel);
     }
 
     private void addRanking(HealthModels.HealthSnapshot value){
@@ -316,14 +335,14 @@ public final class HealthUsageView extends ScrollView {
             if(shown==0){TextView empty=text("没有匹配的应用",13,MUTED,false);empty.setGravity(Gravity.CENTER);appList.addView(empty,new LinearLayout.LayoutParams(-1,dp(48)));}
         };
         render[0].run(); search.addTextChangedListener(new TextWatcher(){public void beforeTextChanged(CharSequence s,int st,int c,int a){} public void onTextChanged(CharSequence s,int st,int b,int c){render[0].run();} public void afterTextChanged(Editable e){}});
-        limitDialogOpen=true;
+        dialogOpen=true;
         AlertDialog dialog=new AlertDialog.Builder(activity).setTitle(editing==null?"设置应用使用限制":"修改应用使用限制").setView(form).setNegativeButton("取消",null).setPositiveButton("保存",(d,w)->{
             int total=hours.getValue()*60+mins.getValue(); if(total<1){Toast.makeText(activity,"时长至少 1 分钟",Toast.LENGTH_SHORT).show();return;}
             String pkg=choices.get(selected[0]).activityInfo.packageName;
             AppLimitStore.upsert(activity,new AppLimit(pkg,total*60000L,true,0,true)); AppLimitService.start(activity);
         }).create();
         dialog.setOnDismissListener(v->{
-            limitDialogOpen=false;
+            dialogOpen=false;
             HealthModels.HealthSnapshot pending=deferredSnapshot; deferredSnapshot=null;
             if(pending!=null) showSnapshot(pending); else if(snapshot!=null) showSnapshot(snapshot);
         });
@@ -369,8 +388,15 @@ public final class HealthUsageView extends ScrollView {
         NumberPicker hours=new NumberPicker(activity);hours.setMinValue(0);hours.setMaxValue(23);hours.setValue(current/60);
         NumberPicker minutes=new NumberPicker(activity);minutes.setMinValue(0);minutes.setMaxValue(11);String[] labels=new String[12];for(int i=0;i<12;i++)labels[i]=String.format(Locale.CHINA,"%02d 分",i*5);minutes.setDisplayedValues(labels);minutes.setValue((current%60)/5);
         pickers.addView(hours,new LinearLayout.LayoutParams(0,dp(150),1));pickers.addView(minutes,new LinearLayout.LayoutParams(0,dp(150),1));
-        new AlertDialog.Builder(activity).setTitle("每日手机使用目标").setView(pickers).setNegativeButton("取消",null)
-            .setPositiveButton("保存",(d,w)->{int value=hours.getValue()*60+minutes.getValue()*5;if(value<30){Toast.makeText(activity,"目标至少设置为 30 分钟",Toast.LENGTH_SHORT).show();return;}manager.getSettings().setDailyGoalMinutes(value);if(snapshot!=null)showSnapshot(snapshot);}).show();
+        dialogOpen=true;
+        AlertDialog dialog=new AlertDialog.Builder(activity).setTitle("每日手机使用目标").setView(pickers).setNegativeButton("取消",null)
+            .setPositiveButton("保存",(d,w)->{int value=hours.getValue()*60+minutes.getValue()*5;if(value<30){Toast.makeText(activity,"目标至少设置为 30 分钟",Toast.LENGTH_SHORT).show();return;}manager.getSettings().setDailyGoalMinutes(value);if(snapshot!=null)showSnapshot(snapshot);}).create();
+        dialog.setOnDismissListener(v->{
+            dialogOpen=false;
+            HealthModels.HealthSnapshot pending=deferredSnapshot; deferredSnapshot=null;
+            if(pending!=null) showSnapshot(pending); else if(snapshot!=null) showSnapshot(snapshot);
+        });
+        dialog.show();
     }
 
     private void showReminderDialog(){

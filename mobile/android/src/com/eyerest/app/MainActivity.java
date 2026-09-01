@@ -445,7 +445,10 @@ public class MainActivity extends Activity {
         styleNavButton(healthNavButton,currentPage==PAGE_HEALTH);
         if(previous!=currentPage){
             View active=currentPage==PAGE_EYE?eyePage:currentPage==PAGE_SLEEP?sleepPage:healthPage;
-            if(active!=null){active.setAlpha(0f);active.animate().alpha(1f).setDuration(160L).start();}
+            // Make the newly selected page interactive immediately. A fade
+            // animation here overlapped the cold-start usage refresh and made
+            // the first tap on Health controls appear to be ignored.
+            if(active!=null){active.animate().cancel();active.setAlpha(1f);}
         }
         if(currentPage==PAGE_HEALTH&&healthPage!=null&&(refreshHealth||!healthPage.hasLoaded()))healthPage.refreshData();
     }
