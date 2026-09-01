@@ -284,6 +284,11 @@ public final class HealthUsageView extends ScrollView {
         int initialSelection=0;
         if(editing!=null) for(int i=0;i<choices.size();i++) if(editing.packageName.equals(choices.get(i).activityInfo.packageName)){initialSelection=i;break;}
         final int[] selected={initialSelection}; final TextView selectedLabel=text("已选择："+labels.get(initialSelection),14,INK,true); selectedLabel.setPadding(0,dp(3),0,dp(5)); form.addView(selectedLabel);
+        if(editing!=null){
+            search.setVisibility(View.GONE);
+            appScroll.setVisibility(View.GONE);
+            selectedLabel.setVisibility(View.GONE);
+        }
         LinearLayout durationLabels=row(); durationLabels.addView(text("小时",12,MUTED,false),new LinearLayout.LayoutParams(0,-2,1)); durationLabels.addView(text("分钟",12,MUTED,false),new LinearLayout.LayoutParams(0,-2,1)); form.addView(durationLabels);
         int initialMinutes=editing==null?60:(int)Math.max(1L,editing.dailyLimitMillis/60000L);
         LinearLayout pick=row(); NumberPicker hours=new NumberPicker(activity); hours.setMinValue(0); hours.setMaxValue(23); String[] hourLabels=new String[24]; for(int i=0;i<24;i++)hourLabels[i]=String.format(Locale.CHINA,"%02d 小时",i); hours.setDisplayedValues(hourLabels); hours.setValue(initialMinutes/60); NumberPicker mins=new NumberPicker(activity); mins.setMinValue(0); mins.setMaxValue(59); String[] minuteLabels=new String[60]; for(int i=0;i<60;i++)minuteLabels[i]=String.format(Locale.CHINA,"%02d 分钟",i); mins.setDisplayedValues(minuteLabels); mins.setValue(initialMinutes%60); pick.addView(hours,new LinearLayout.LayoutParams(0,dp(150),1)); pick.addView(mins,new LinearLayout.LayoutParams(0,dp(150),1)); form.addView(pick);
