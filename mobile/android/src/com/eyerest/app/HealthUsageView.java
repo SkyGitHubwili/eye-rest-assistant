@@ -44,6 +44,8 @@ public final class HealthUsageView extends ScrollView {
     private HealthModels.HealthSnapshot snapshot;
     private boolean loaded;
     private boolean loading;
+    private boolean limitDialogOpen;
+    private HealthModels.HealthSnapshot deferredSnapshot;
     private float pullStartY=-1f;
 
     public HealthUsageView(Activity activity){
@@ -83,7 +85,8 @@ public final class HealthUsageView extends ScrollView {
         if(snapshot==null) showLoading();
         manager.refresh(new HealthUsageManager.Callback<HealthModels.HealthSnapshot>(){
             @Override public void onSuccess(HealthModels.HealthSnapshot value){
-                loading=false;loaded=true;snapshot=value;showSnapshot(value);
+                loading=false;loaded=true;snapshot=value;
+                if(limitDialogOpen) deferredSnapshot=value; else showSnapshot(value);
             }
             @Override public void onError(Throwable error){
                 loading=false;loaded=true;
@@ -308,11 +311,18 @@ public final class HealthUsageView extends ScrollView {
             if(shown==0){TextView empty=text("没有匹配的应用",13,MUTED,false);empty.setGravity(Gravity.CENTER);appList.addView(empty,new LinearLayout.LayoutParams(-1,dp(48)));}
         };
         render[0].run(); search.addTextChangedListener(new TextWatcher(){public void beforeTextChanged(CharSequence s,int st,int c,int a){} public void onTextChanged(CharSequence s,int st,int b,int c){render[0].run();} public void afterTextChanged(Editable e){}});
-        new AlertDialog.Builder(activity).setTitle(editing==null?"设置应用使用限制":"修改应用使用限制").setView(form).setNegativeButton("取消",null).setPositiveButton("保存",(d,w)->{
+        limitDialogOpen=true;
+        AlertDialog dialog=new AlertDialog.Builder(activity).setTitle(editing==null?"设置应用使用限制":"修改应用使用限制").setView(form).setNegativeButton("取消",null).setPositiveButton("保存",(d,w)->{
             int total=hours.getValue()*60+mins.getValue(); if(total<1){Toast.makeText(activity,"时长至少 1 分钟",Toast.LENGTH_SHORT).show();return;}
             String pkg=choices.get(selected[0]).activityInfo.packageName;
-            AppLimitStore.upsert(activity,new AppLimit(pkg,total*60000L,true,0,true)); AppLimitService.start(activity); if(snapshot!=null)showSnapshot(snapshot);
-        }).show();
+            AppLimitStore.upsert(activity,new AppLimit(pkg,total*60000L,true,0,true)); AppLimitService.start(activity);
+        }).create();
+        dialog.setOnDismissListener(v->{
+            limitDialogOpen=false;
+            HealthModels.HealthSnapshot pending=deferredSnapshot; deferredSnapshot=null;
+            if(pending!=null) showSnapshot(pending); else if(snapshot!=null) showSnapshot(snapshot);
+        });
+        dialog.show();
     }
 
     private void showAppLimitDialog(){
