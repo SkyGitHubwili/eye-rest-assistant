@@ -28,6 +28,8 @@ import android.util.Log;
 public final class AppLimitService extends Service {
     private static final String TAG = "AppLimit";
     private static final String CHANNEL = "health_app_limits";
+    // Keep the restriction responsive without spinning a tight loop.
+    private static final long CHECK_INTERVAL_MS = 1_000L;
     private final Handler handler = new Handler();
     private WindowManager windowManager;
     private View overlay;
@@ -47,7 +49,7 @@ public final class AppLimitService extends Service {
         if (!AppLimitStore.hasEnabled(this)) { stopSelf(); return START_NOT_STICKY; }
         handler.removeCallbacks(checker); handler.post(checker); return START_STICKY;
     }
-    private final Runnable checker = new Runnable() { @Override public void run() { check(); handler.postDelayed(this, 8000L); } };
+    private final Runnable checker = new Runnable() { @Override public void run() { check(); handler.postDelayed(this, CHECK_INTERVAL_MS); } };
 
     private void check() {
         if (!AppLimitStore.hasEnabled(this)) { removeOverlay(); stopSelf(); return; }
