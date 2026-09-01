@@ -29,7 +29,7 @@ public final class AppLimitService extends Service {
     private static final String TAG = "AppLimit";
     private static final String CHANNEL = "health_app_limits";
     // Keep the restriction responsive without spinning a tight loop.
-    private static final long CHECK_INTERVAL_MS = 250L;
+    private static final long CHECK_INTERVAL_MS = 150L;
     private final Handler handler = new Handler();
     private WindowManager windowManager;
     private View overlay;
