@@ -1,11 +1,9 @@
 package com.eyerest.app;
 
 import android.app.AlarmManager;
-import android.app.AppOpsManager;
 import android.app.PendingIntent;
 import android.content.Context;
 import android.content.Intent;
-import android.os.Process;
 import android.os.SystemClock;
 
 /**
@@ -71,15 +69,7 @@ public final class HealthReminderScheduler {
 
     /** Android 的“使用情况访问权限”由 AppOps 管理，普通运行时权限检查不足以判断。 */
     public static boolean hasUsageAccess(Context context) {
-        if (context == null) return false;
-        AppOpsManager appOps = (AppOpsManager) context.getSystemService(Context.APP_OPS_SERVICE);
-        if (appOps == null) return false;
-        int mode = appOps.checkOpNoThrow(
-            AppOpsManager.OPSTR_GET_USAGE_STATS,
-            Process.myUid(),
-            context.getPackageName()
-        );
-        return mode == AppOpsManager.MODE_ALLOWED;
+        return context != null && new UsageStatsRepository(context).hasUsageAccess();
     }
 
     private static PendingIntent pendingIntent(Context context, int extraFlag) {

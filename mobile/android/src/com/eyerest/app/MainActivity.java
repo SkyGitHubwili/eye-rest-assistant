@@ -48,7 +48,7 @@ public class MainActivity extends Activity {
     private TextView sleepStartPeriod, sleepWakePeriod;
     private View eyePage, sleepPage;
     private HealthUsageView healthPage;
-    private Button eyeNavButton, sleepNavButton, healthNavButton;
+    private NavItem eyeNavButton, sleepNavButton, healthNavButton;
     private int currentPage = PAGE_EYE;
     private final android.os.Handler handler = new android.os.Handler();
     private final int[] workValues = {0, 20, 25, 30};
@@ -414,25 +414,22 @@ public class MainActivity extends Activity {
         if(!SleepSettings.MODE_OFF.equals(prefs.getString("sleep_mode",SleepSettings.MODE_OFF)))startSleepService();
         LinearLayout navigation=row();
         navigation.setGravity(Gravity.CENTER);
-        navigation.setPadding(dp(10),dp(7),dp(10),dp(7));
+        navigation.setPadding(dp(10),dp(5),dp(10),dp(4));
         navigation.setBackgroundColor(Color.WHITE);
         navigation.setElevation(dp(10));
-        eyeNavButton=navButton("◉\n护眼",PAGE_EYE);
-        sleepNavButton=navButton("☾\n睡眠",PAGE_SLEEP);
-        healthNavButton=navButton("▣\n健康使用",PAGE_HEALTH);
-        navigation.addView(eyeNavButton,new LinearLayout.LayoutParams(0,dp(58),1));
-        navigation.addView(sleepNavButton,new LinearLayout.LayoutParams(0,dp(58),1));
-        navigation.addView(healthNavButton,new LinearLayout.LayoutParams(0,dp(58),1));
-        shell.addView(navigation,new LinearLayout.LayoutParams(-1,dp(72)));
+        eyeNavButton=navButton(com.eyerest.app.R.drawable.ic_nav_eye,"护眼",PAGE_EYE);
+        sleepNavButton=navButton(com.eyerest.app.R.drawable.ic_nav_sleep,"睡眠",PAGE_SLEEP);
+        healthNavButton=navButton(com.eyerest.app.R.drawable.ic_nav_health,"健康使用",PAGE_HEALTH);
+        navigation.addView(eyeNavButton,new LinearLayout.LayoutParams(0,dp(64),1));
+        navigation.addView(sleepNavButton,new LinearLayout.LayoutParams(0,dp(64),1));
+        navigation.addView(healthNavButton,new LinearLayout.LayoutParams(0,dp(64),1));
+        shell.addView(navigation,new LinearLayout.LayoutParams(-1,dp(74)));
         showPage(currentPage,false);
         return shell;
     }
 
-    private Button navButton(String label,int page){
-        Button button=button(label,Color.TRANSPARENT,Color.rgb(137,148,142));
-        button.setTextSize(12);button.setGravity(Gravity.CENTER);button.setPadding(0,0,0,0);
-        button.setOnClickListener(v->showPage(page,true));
-        return button;
+    private NavItem navButton(int iconRes,String label,int page){
+        return new NavItem(iconRes,label,page);
     }
     private void showPage(int page,boolean refreshHealth){
         int previous=currentPage;
@@ -450,11 +447,9 @@ public class MainActivity extends Activity {
         }
         if(currentPage==PAGE_HEALTH&&healthPage!=null&&(refreshHealth||!healthPage.hasLoaded()))healthPage.refreshData();
     }
-    private void styleNavButton(Button button,boolean selected){
+    private void styleNavButton(NavItem button,boolean selected){
         if(button==null)return;
-        button.setTextColor(selected?GREEN:Color.rgb(137,148,142));
-        button.setTypeface(Typeface.DEFAULT,selected?Typeface.BOLD:Typeface.NORMAL);
-        button.setBackground(round(selected?Color.rgb(229,241,232):Color.TRANSPARENT,14));
+        button.applyStyle(selected);
     }
 
     private void toggleTimer() {
@@ -783,6 +778,51 @@ public class MainActivity extends Activity {
         if(checkSelfPermission(Manifest.permission.READ_PHONE_STATE)!=PackageManager.PERMISSION_GRANTED)
             missing.add(Manifest.permission.READ_PHONE_STATE);
         if(!missing.isEmpty())requestPermissions(missing.toArray(new String[0]),7);
+    }
+
+    /** Bottom navigation item: a small vector icon, label and a subtle selected indicator. */
+    private final class NavItem extends LinearLayout {
+        private final ImageView icon;
+        private final TextView label;
+        private final View indicator;
+
+        NavItem(int iconRes,String title,int page){
+            super(MainActivity.this);
+            setOrientation(LinearLayout.VERTICAL);
+            setGravity(Gravity.CENTER);
+            setClickable(true);
+            setFocusable(true);
+            setPadding(0,dp(1),0,0);
+            setBackgroundColor(Color.TRANSPARENT);
+            setContentDescription(title);
+
+            icon=new ImageView(MainActivity.this);
+            icon.setImageResource(iconRes);
+            icon.setScaleType(ImageView.ScaleType.CENTER_INSIDE);
+            addView(icon,new LinearLayout.LayoutParams(dp(25),dp(25)));
+
+            label=text(title,12,Color.rgb(137,148,142),false);
+            label.setGravity(Gravity.CENTER);
+            LinearLayout.LayoutParams labelParams=new LinearLayout.LayoutParams(-1,dp(22));
+            labelParams.setMargins(0,dp(1),0,0);
+            addView(label,labelParams);
+
+            indicator=new View(MainActivity.this);
+            indicator.setBackground(round(GREEN,3));
+            LinearLayout.LayoutParams indicatorParams=new LinearLayout.LayoutParams(dp(22),dp(3));
+            indicatorParams.setMargins(0,dp(2),0,0);
+            addView(indicator,indicatorParams);
+            setOnClickListener(v->showPage(page,true));
+        }
+
+        void applyStyle(boolean selected){
+            int color=selected?GREEN:Color.rgb(137,148,142);
+            icon.setColorFilter(color);
+            label.setTextColor(color);
+            label.setTypeface(Typeface.DEFAULT,selected?Typeface.BOLD:Typeface.NORMAL);
+            indicator.setVisibility(selected?View.VISIBLE:View.INVISIBLE);
+            setAlpha(selected?1f:.86f);
+        }
     }
 
     private LinearLayout column(){ LinearLayout v=new LinearLayout(this);v.setOrientation(LinearLayout.VERTICAL);return v; }

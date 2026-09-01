@@ -170,6 +170,9 @@ public final class HealthDataActivity extends Activity {
     }
 
     private void refreshData() {
+        // Re-read AppOps after returning from the system Usage Access page;
+        // this avoids showing a stale permission card for the cache window.
+        manager.invalidateUsageAccessCache();
         if (!manager.hasUsageAccess()) {
             showState("需要使用情况访问权限",
                 "健康使用需要读取手机的应用使用时间，才能统计今日使用情况和 App 排行。",

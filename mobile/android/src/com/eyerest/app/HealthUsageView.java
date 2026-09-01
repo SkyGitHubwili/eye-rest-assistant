@@ -59,6 +59,9 @@ public final class HealthUsageView extends ScrollView {
 
     public void refreshData(){
         if(loading)return;
+        // The user may have just toggled Usage Access in Settings. Do not let
+        // a short-lived cached AppOps result keep the permission card visible.
+        manager.invalidateUsageAccessCache();
         if(!manager.hasUsageAccess()){
             loaded=true;snapshot=null;HealthReminderScheduler.cancel(activity);showPermission();return;
         }
@@ -185,7 +188,8 @@ public final class HealthUsageView extends ScrollView {
         for(int i=0;i<count;i++){
             HealthModels.AppUsage app=value.topApps.get(i);
             LinearLayout item=row();item.setPadding(0,dp(14),0,dp(8));
-            ImageView icon=new ImageView(activity);Drawable drawable=manager.loadAppIcon(app.packageName);if(drawable!=null)icon.setImageDrawable(drawable);
+            ImageView icon=new ImageView(activity);Drawable drawable=manager.loadAppIcon(app.packageName);
+            icon.setImageDrawable(drawable!=null?drawable:activity.getDrawable(android.R.drawable.sym_def_app_icon));
             icon.setContentDescription(app.appName);item.addView(icon,new LinearLayout.LayoutParams(dp(38),dp(38)));
             LinearLayout details=column();details.setPadding(dp(11),0,0,0);
             LinearLayout line=row();TextView name=text(app.appName,14,INK,true);name.setSingleLine(true);line.addView(name,new LinearLayout.LayoutParams(0,-2,1));

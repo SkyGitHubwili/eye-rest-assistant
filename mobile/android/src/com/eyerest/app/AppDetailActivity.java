@@ -184,6 +184,9 @@ public final class AppDetailActivity extends Activity {
     }
 
     private void refreshData() {
+        // Permission may have been changed in Settings while this detail page
+        // was paused, so force a fresh AppOps observation before querying.
+        manager.invalidateUsageAccessCache();
         if (!manager.hasUsageAccess()) {
             showState("需要使用情况访问权限",
                 "健康使用需要读取手机的应用使用时间，才能显示此应用的真实统计。",

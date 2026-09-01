@@ -4,6 +4,10 @@
     android:versionCode="67"
     android:versionName="3.0.0">
     <uses-permission android:name="android.permission.PACKAGE_USAGE_STATS" />
+    <!-- Required on Android 11+ to resolve names/icons for the package names
+         returned by UsageStatsManager. This app's core purpose is an on-device
+         app-usage dashboard; no package inventory leaves the device. -->
+    <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES" />
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />

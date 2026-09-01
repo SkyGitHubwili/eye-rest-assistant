@@ -69,6 +69,9 @@ public final class HealthUsageManager {
 
     public boolean hasUsageAccess() { return repository.hasUsageAccess(); }
 
+    /** Called when the Activity resumes from the system Usage Access screen. */
+    public void invalidateUsageAccessCache() { repository.invalidateAccessCache(); }
+
     public Intent createUsageAccessSettingsIntent() {
         return repository.createUsageAccessSettingsIntent();
     }
@@ -152,15 +155,16 @@ public final class HealthUsageManager {
 
         List<List<HealthModels.AppUsageStatRecord>> statsByDay =
             new ArrayList<List<HealthModels.AppUsageStatRecord>>(SNAPSHOT_DAYS);
+        List<Boolean> statsAvailabilityByDay =
+            new ArrayList<Boolean>(SNAPSHOT_DAYS);
         Set<String> packageNames = new HashSet<String>();
-        boolean statsAvailable = true;
         for (int index = 0; index < dayStarts.size(); index++) {
             long start = dayStarts.get(index);
             long end = index + 1 < dayStarts.size() ? dayStarts.get(index + 1) : nowMillis;
             List<HealthModels.AppUsageStatRecord> stats =
                 repository.queryUsageStatsRecords(start, end);
             statsByDay.add(stats);
-            statsAvailable &= repository.wasLastUsageStatsQueryAvailable();
+            statsAvailabilityByDay.add(repository.wasLastUsageStatsQueryAvailable());
             for (HealthModels.AppUsageStatRecord stat : stats) {
                 if (stat != null && stat.packageName.length() > 0) {
                     packageNames.add(stat.packageName);
@@ -181,7 +185,7 @@ public final class HealthUsageManager {
             long start = dayStarts.get(index);
             long end = index + 1 < dayStarts.size() ? dayStarts.get(index + 1) : nowMillis;
             days.add(calculator.calculateDay(start, end, statsByDay.get(index),
-                events, metadata, statsAvailable, eventsAvailable));
+                events, metadata, statsAvailabilityByDay.get(index), eventsAvailable));
         }
         if (!hasUsageAccess()) throw new PermissionDeniedException("Usage access was revoked");
 

@@ -80,11 +80,22 @@ public final class UsageStatsCalculator {
             long duration = usageStatsAvailable && statDuration > 0L ? statDuration : eventDuration;
             duration = Math.min(rangeLength, Math.max(0L, duration));
             if (duration <= 0L) continue;
-            total = saturatingAdd(total, duration);
             HealthModels.AppMetadata info = metadata == null ? null : metadata.get(packageName);
             if (info == null) {
-                info = new HealthModels.AppMetadata(packageName, packageName, false, true);
+                // Metadata lookup can transiently fail on vendor ROMs. Keep
+                // the real package/duration rather than silently dropping it;
+                // the explicit core-package filter below still protects the
+                // ranking from Android shell components.
+                info = new HealthModels.AppMetadata(packageName, packageName, true, true);
             }
+            // UsageStats can retain entries for uninstalled packages and can
+            // include Android shell/service components. They must not inflate
+            // the user's phone-time total or appear in Top Apps. A preinstalled
+            // app with a launch activity remains userFacing and is retained.
+            if (!info.installed || !info.userFacing || isCoreSystemPackage(packageName)) {
+                continue;
+            }
+            total = saturatingAdd(total, duration);
             int launchCount = intValue(launches, packageName);
             boolean packageLaunchesAvailable = launchCountsAvailable
                 && eventPackages.contains(packageName);
@@ -240,6 +251,7 @@ public final class UsageStatsCalculator {
         List<HealthModels.AppUsage> fallback = new ArrayList<HealthModels.AppUsage>();
         for (HealthModels.AppUsage app : day.apps) {
             if (app == null || app.usageMillis <= 0L) continue;
+            if (isCoreSystemPackage(app.packageName)) continue;
             if (app.userFacing) primary.add(app); else fallback.add(app);
         }
         sortApps(primary);
@@ -407,6 +419,20 @@ public final class UsageStatsCalculator {
             if (target.size() >= limit) return;
             target.add(app);
         }
+    }
+
+    /** Do not put the Android shell itself in a user-facing Top Apps list. */
+    private static boolean isCoreSystemPackage(String packageName) {
+        if (packageName == null) return true;
+        return "android".equals(packageName)
+            || "com.android.systemui".equals(packageName)
+            || "com.android.settings".equals(packageName)
+            || "com.android.launcher".equals(packageName)
+            || packageName.startsWith("com.android.launcher.")
+            || "com.google.android.permissioncontroller".equals(packageName)
+            || "com.android.permissioncontroller".equals(packageName)
+            || "com.android.packageinstaller".equals(packageName)
+            || "com.android.providers.settings".equals(packageName);
     }
 
     private static void addDuration(Map<String, Long> values, String key, long duration) {

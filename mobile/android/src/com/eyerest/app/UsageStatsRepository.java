@@ -9,8 +9,10 @@ import android.content.Intent;
 import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageManager;
 import android.graphics.drawable.Drawable;
+import android.os.Build;
 import android.os.Process;
 import android.provider.Settings;
+import android.util.Log;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -21,11 +23,17 @@ import java.util.Map;
 
 /** Android UsageStats/UsageEvents 的唯一访问层。这里不生成或填充任何虚构数据。 */
 public final class UsageStatsRepository {
+    private static final String TAG = "HealthUsage";
+    private static final long ACCESS_PROBE_CACHE_MILLIS = 15_000L;
     private final Context context;
     private final UsageStatsManager usageStatsManager;
     private final PackageManager packageManager;
     private volatile boolean lastUsageStatsQueryAvailable;
     private volatile boolean lastEventQueryAvailable;
+    private volatile int lastAppOpsMode = AppOpsManager.MODE_DEFAULT;
+    private volatile String lastQueryError = "";
+    private volatile long accessProbeAtMillis;
+    private volatile boolean accessProbeResult;
 
     public UsageStatsRepository(Context context) {
         if (context == null) throw new IllegalArgumentException("context == null");
@@ -35,19 +43,57 @@ public final class UsageStatsRepository {
     }
 
     /** 使用情况访问权限由 AppOps 管理，不是普通 runtime permission。 */
-    public boolean hasUsageAccess() { return hasUsageAccess(context); }
+    public boolean hasUsageAccess() {
+        long now = System.currentTimeMillis();
+        if (now - accessProbeAtMillis < ACCESS_PROBE_CACHE_MILLIS) return accessProbeResult;
+        lastAppOpsMode = readAppOpsMode(context);
+        boolean result = lastAppOpsMode == AppOpsManager.MODE_ALLOWED
+            || lastAppOpsMode == AppOpsManager.MODE_FOREGROUND;
+        // A few vendor ROMs report MODE_DEFAULT even after the user enabled
+        // this special access. A small real query makes the check resilient
+        // without treating an empty, permission-denied result as permission.
+        if (!result && lastAppOpsMode == AppOpsManager.MODE_DEFAULT && usageStatsManager != null) {
+            long begin = now - 24L * 60L * 60L * 1000L;
+            try {
+                Map<String, UsageStats> probe = usageStatsManager
+                    .queryAndAggregateUsageStats(begin, now);
+                result = probe != null && !probe.isEmpty();
+            } catch (RuntimeException error) {
+                lastQueryError = error.getClass().getSimpleName();
+            }
+        }
+        accessProbeResult = result;
+        accessProbeAtMillis = now;
+        return result;
+    }
+
+    /** Force the next permission check to observe a change made in Settings. */
+    public void invalidateAccessCache() {
+        accessProbeAtMillis = 0L;
+    }
 
     public static boolean hasUsageAccess(Context context) {
         if (context == null) return false;
+        return new UsageStatsRepository(context).hasUsageAccess();
+    }
+
+    private static int readAppOpsMode(Context context) {
+        if (context == null) return AppOpsManager.MODE_ERRORED;
         try {
-            AppOpsManager appOps = (AppOpsManager) context.getApplicationContext()
+            Context appContext = context.getApplicationContext();
+            AppOpsManager appOps = (AppOpsManager) appContext
                 .getSystemService(Context.APP_OPS_SERVICE);
-            if (appOps == null) return false;
-            int mode = appOps.checkOpNoThrow(AppOpsManager.OPSTR_GET_USAGE_STATS,
-                Process.myUid(), context.getPackageName());
-            return mode == AppOpsManager.MODE_ALLOWED;
+            if (appOps == null) return AppOpsManager.MODE_ERRORED;
+            ApplicationInfo info = appContext.getApplicationInfo();
+            int uid = info == null ? Process.myUid() : info.uid;
+            if (Build.VERSION.SDK_INT >= 29) {
+                return appOps.unsafeCheckOpNoThrow(AppOpsManager.OPSTR_GET_USAGE_STATS,
+                    uid, appContext.getPackageName());
+            }
+            return appOps.checkOpNoThrow(AppOpsManager.OPSTR_GET_USAGE_STATS,
+                uid, appContext.getPackageName());
         } catch (RuntimeException ignored) {
-            return false;
+            return AppOpsManager.MODE_ERRORED;
         }
     }
 
@@ -65,12 +111,35 @@ public final class UsageStatsRepository {
     public List<HealthModels.AppUsageStatRecord> queryUsageStatsRecords(long beginMillis,
                                                                         long endMillis) {
         lastUsageStatsQueryAvailable = false;
+        lastQueryError = "";
         if (usageStatsManager == null || endMillis <= beginMillis) {
             lastUsageStatsQueryAvailable = usageStatsManager != null;
             return Collections.emptyList();
         }
-        List<UsageStats> raw = usageStatsManager.queryUsageStats(
-            UsageStatsManager.INTERVAL_DAILY, beginMillis, endMillis);
+        List<UsageStats> raw = null;
+        String source = "aggregate";
+        try {
+            Map<String, UsageStats> aggregate = usageStatsManager
+                .queryAndAggregateUsageStats(beginMillis, endMillis);
+            if (aggregate != null && !aggregate.isEmpty()) {
+                raw = new ArrayList<UsageStats>(aggregate.values());
+            }
+        } catch (RuntimeException error) {
+            lastQueryError = error.getClass().getSimpleName();
+            Log.w(TAG, "queryAndAggregateUsageStats failed", error);
+        }
+        // Some vendor implementations expose the bucket API but return an
+        // empty aggregate for a partial local day. Keep a bucket fallback.
+        if (raw == null || raw.isEmpty()) {
+            source = "buckets";
+            try {
+                raw = usageStatsManager.queryUsageStats(
+                    UsageStatsManager.INTERVAL_BEST, beginMillis, endMillis);
+            } catch (RuntimeException error) {
+                lastQueryError = error.getClass().getSimpleName();
+                Log.w(TAG, "queryUsageStats failed", error);
+            }
+        }
         Map<String, HealthModels.AppUsageStatRecord> merged =
             new HashMap<String, HealthModels.AppUsageStatRecord>();
         if (raw != null) {
@@ -98,7 +167,10 @@ public final class UsageStatsRepository {
                 return byUsage != 0 ? byUsage : a.packageName.compareTo(b.packageName);
             }
         });
-        lastUsageStatsQueryAvailable = true;
+        lastUsageStatsQueryAvailable = raw != null;
+        Log.d(TAG, "usage query package=" + context.getPackageName()
+            + " begin=" + beginMillis + " end=" + endMillis
+            + " source=" + source + " records=" + result.size());
         return result;
     }
 
@@ -117,7 +189,14 @@ public final class UsageStatsRepository {
             lastEventQueryAvailable = usageStatsManager != null;
             return result;
         }
-        UsageEvents events = usageStatsManager.queryEvents(beginMillis, endMillis);
+        UsageEvents events;
+        try {
+            events = usageStatsManager.queryEvents(beginMillis, endMillis);
+        } catch (RuntimeException error) {
+            lastQueryError = error.getClass().getSimpleName();
+            Log.w(TAG, "queryEvents failed", error);
+            return result;
+        }
         if (events == null) {
             lastEventQueryAvailable = true;
             return result;
@@ -152,6 +231,12 @@ public final class UsageStatsRepository {
     public boolean wasLastUsageStatsQueryAvailable() { return lastUsageStatsQueryAvailable; }
     public boolean wasLastEventQueryAvailable() { return lastEventQueryAvailable; }
 
+    /** Short diagnostic string for an in-app support/debug surface. */
+    public String getLastDiagnostics() {
+        return "appOps=" + lastAppOpsMode + ",stats=" + lastUsageStatsQueryAvailable
+            + ",events=" + lastEventQueryAvailable + ",error=" + lastQueryError;
+    }
+
     public HealthModels.AppMetadata getAppMetadata(String packageName) {
         if (packageName == null || packageName.length() == 0) {
             return new HealthModels.AppMetadata("", "", false, false);
@@ -161,14 +246,20 @@ public final class UsageStatsRepository {
             CharSequence label = packageManager.getApplicationLabel(info);
             String appName = label == null ? packageName : label.toString();
             Intent launchIntent = packageManager.getLaunchIntentForPackage(packageName);
-            boolean userFacing = launchIntent != null
-                || (info.flags & ApplicationInfo.FLAG_SYSTEM) == 0;
+            boolean userFacing = !isCoreSystemPackage(packageName)
+                && (launchIntent != null || (info.flags & ApplicationInfo.FLAG_SYSTEM) == 0);
             return new HealthModels.AppMetadata(packageName, appName, true, userFacing);
         } catch (PackageManager.NameNotFoundException ignored) {
-            // Usage data may remain after uninstall; retain the package as a truthful fallback.
-            return new HealthModels.AppMetadata(packageName, packageName, false, false);
+            // A few Android 11+/vendor builds hide otherwise valid packages from
+            // PackageManager even though UsageStatsManager still returns their
+            // real usage.  Keep the record visible instead of turning a lookup
+            // quirk into an empty health page.  Core shell packages are still
+            // removed by UsageStatsCalculator's explicit package filter.
+            return new HealthModels.AppMetadata(packageName, packageName, true,
+                !isCoreSystemPackage(packageName));
         } catch (RuntimeException ignored) {
-            return new HealthModels.AppMetadata(packageName, packageName, false, false);
+            return new HealthModels.AppMetadata(packageName, packageName, true,
+                !isCoreSystemPackage(packageName));
         }
     }
 
@@ -187,7 +278,21 @@ public final class UsageStatsRepository {
 
     private static boolean isRelevantEventType(int type) {
         return type == 1 || type == 2 || type == 15 || type == 16 || type == 17 || type == 18
-            || type == 23 || type == 26 || type == 27;
+            || type == 21 || type == 22 || type == 23 || type == 26 || type == 27;
+    }
+
+    /** Packages which represent the shell/system plumbing, not user apps. */
+    private static boolean isCoreSystemPackage(String packageName) {
+        if (packageName == null) return true;
+        return "android".equals(packageName)
+            || "com.android.systemui".equals(packageName)
+            || "com.android.settings".equals(packageName)
+            || "com.android.launcher".equals(packageName)
+            || packageName.startsWith("com.android.launcher.")
+            || "com.google.android.permissioncontroller".equals(packageName)
+            || "com.android.permissioncontroller".equals(packageName)
+            || "com.android.packageinstaller".equals(packageName)
+            || "com.android.providers.settings".equals(packageName);
     }
 
     private static int normalizeEventType(int type) {

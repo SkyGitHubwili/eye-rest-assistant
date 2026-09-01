@@ -16,6 +16,10 @@ public final class HealthModels {
         public static final int TYPE_SCREEN_NON_INTERACTIVE = 16;
         public static final int TYPE_KEYGUARD_SHOWN = 17;
         public static final int TYPE_KEYGUARD_HIDDEN = 18;
+        /** Android 10+ emits activity lifecycle events instead of (or in addition to)
+         * MOVE_TO_FOREGROUND/BACKGROUND on a number of ROMs. */
+        public static final int TYPE_ACTIVITY_RESUMED = 21;
+        public static final int TYPE_ACTIVITY_PAUSED = 22;
         public static final int TYPE_ACTIVITY_STOPPED = 23;
         public static final int TYPE_DEVICE_SHUTDOWN = 26;
         public static final int TYPE_DEVICE_STARTUP = 27;
@@ -33,9 +37,12 @@ public final class HealthModels {
         public String getPackageName() { return packageName; }
         public long getTimestampMillis() { return timestampMillis; }
         public int getEventType() { return eventType; }
-        public boolean isForeground() { return eventType == TYPE_FOREGROUND; }
+        public boolean isForeground() {
+            return eventType == TYPE_FOREGROUND || eventType == TYPE_ACTIVITY_RESUMED;
+        }
         public boolean isBackground() {
-            return eventType == TYPE_BACKGROUND || eventType == TYPE_ACTIVITY_STOPPED;
+            return eventType == TYPE_BACKGROUND || eventType == TYPE_ACTIVITY_PAUSED
+                || eventType == TYPE_ACTIVITY_STOPPED;
         }
         public boolean isHardBreak() {
             return eventType == TYPE_SCREEN_NON_INTERACTIVE
