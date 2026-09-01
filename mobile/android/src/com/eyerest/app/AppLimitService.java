@@ -13,6 +13,7 @@ import android.graphics.Color;
 import android.graphics.PixelFormat;
 import android.os.Build;
 import android.os.Handler;
+import android.os.HandlerThread;
 import android.provider.Settings;
 import android.view.Gravity;
 import android.view.View;
@@ -30,7 +31,8 @@ public final class AppLimitService extends Service {
     private static final String CHANNEL = "health_app_limits";
     // Keep the restriction responsive without spinning a tight loop.
     private static final long CHECK_INTERVAL_MS = 150L;
-    private final Handler handler = new Handler();
+    private HandlerThread checkerThread;
+    private Handler handler;
     private WindowManager windowManager;
     private View overlay;
     private String blockedPackage;
@@ -43,7 +45,13 @@ public final class AppLimitService extends Service {
     }
     public static void stop(Context context) { try { context.stopService(new Intent(context, AppLimitService.class)); } catch (RuntimeException ignored) {} }
 
-    @Override public void onCreate() { super.onCreate(); createChannel(); startForeground(31, notification()); handler.post(checker); Log.i(TAG, "service created"); }
+    @Override public void onCreate() {
+        super.onCreate();
+        checkerThread = new HandlerThread("app-limit-checker");
+        checkerThread.start();
+        handler = new Handler(checkerThread.getLooper());
+        createChannel(); startForeground(31, notification()); handler.post(checker); Log.i(TAG, "service created");
+    }
     @Override public int onStartCommand(Intent intent, int flags, int startId) {
         Log.i(TAG, "service command limits=" + AppLimitStore.get(this).size());
         if (!AppLimitStore.hasEnabled(this)) { stopSelf(); return START_NOT_STICKY; }
@@ -127,6 +135,11 @@ public final class AppLimitService extends Service {
     private void removeOverlay() { if (overlay != null && windowManager != null) { try { windowManager.removeView(overlay); } catch (RuntimeException ignored) {} } overlay = null; blockedPackage = null; }
     private void createChannel() { if (Build.VERSION.SDK_INT >= 26) { NotificationChannel c = new NotificationChannel(CHANNEL,"应用使用限制",NotificationManager.IMPORTANCE_LOW); getSystemService(NotificationManager.class).createNotificationChannel(c); } }
     private Notification notification() { return new Notification.Builder(this, CHANNEL).setSmallIcon(R.mipmap.ic_launcher).setContentTitle("应用使用限制已开启").setContentText("达到每日上限后会显示限制提示").setOngoing(true).build(); }
-    @Override public void onDestroy() { handler.removeCallbacks(checker); removeOverlay(); super.onDestroy(); }
+    @Override public void onDestroy() {
+        if (handler != null) handler.removeCallbacks(checker);
+        removeOverlay();
+        if (checkerThread != null) checkerThread.quitSafely();
+        super.onDestroy();
+    }
     @Override public android.os.IBinder onBind(Intent intent) { return null; }
 }
