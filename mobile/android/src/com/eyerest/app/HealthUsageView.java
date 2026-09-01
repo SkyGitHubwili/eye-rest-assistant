@@ -250,10 +250,11 @@ public final class HealthUsageView extends ScrollView {
             labels.addView(text("今日已用 "+duration(usageToday(limit.packageName))+" / 上限 "+duration(limit.dailyLimitMillis),12,MUTED,false));
             item.addView(labels,new LinearLayout.LayoutParams(0,-2,1));
             Button remove=button("移除",Color.TRANSPARENT,Color.rgb(184,74,53)); remove.setTextSize(12); LinearLayout.LayoutParams rp=new LinearLayout.LayoutParams(dp(56),dp(38)); rp.setMargins(dp(6),0,0,0); item.addView(remove,rp);
+            item.setOnClickListener(v->showAppLimitDialogV2(limit));
             remove.setOnClickListener(v->{AppLimitStore.remove(activity,limit.packageName); if(AppLimitStore.hasEnabled(activity))AppLimitService.start(activity);else AppLimitService.stop(activity); if(snapshot!=null)showSnapshot(snapshot);});
             panel.addView(item);
         }
-        add.setOnClickListener(v->showAppLimitDialogV2()); addCard(panel);
+        add.setOnClickListener(v->showAppLimitDialogV2(null)); addCard(panel);
     }
 
     private String appLabel(String pkg){
@@ -269,7 +270,7 @@ public final class HealthUsageView extends ScrollView {
         UsageStats stat=values==null?null:values.get(pkg); return stat==null?0L:stat.getTotalTimeInForeground();
     }
 
-    private void showAppLimitDialogV2(){
+    private void showAppLimitDialogV2(final AppLimit editing){
         final PackageManager pm=activity.getPackageManager();
         Intent launcher=new Intent(Intent.ACTION_MAIN); launcher.addCategory(Intent.CATEGORY_LAUNCHER);
         List<ResolveInfo> apps=pm.queryIntentActivities(launcher,PackageManager.MATCH_ALL);
@@ -280,9 +281,12 @@ public final class HealthUsageView extends ScrollView {
         TextView mode=text("每日累计使用时长（不是时间段）",13,GREEN,true); mode.setPadding(0,0,0,dp(6)); form.addView(mode);
         EditText search=new EditText(activity); search.setSingleLine(true); search.setHint("搜索应用"); search.setTextSize(15); search.setPadding(dp(12),0,dp(12),0); search.setBackground(round(Color.rgb(243,246,242),10)); form.addView(search,new LinearLayout.LayoutParams(-1,dp(50)));
         ScrollView appScroll=new ScrollView(activity); LinearLayout appList=column(); appScroll.addView(appList,new ScrollView.LayoutParams(-1,-2)); LinearLayout.LayoutParams appScrollParams=new LinearLayout.LayoutParams(-1,dp(220)); appScrollParams.setMargins(0,dp(6),0,dp(6)); form.addView(appScroll,appScrollParams);
-        final int[] selected={0}; final TextView selectedLabel=text("已选择："+labels.get(0),14,INK,true); selectedLabel.setPadding(0,dp(3),0,dp(5)); form.addView(selectedLabel);
+        int initialSelection=0;
+        if(editing!=null) for(int i=0;i<choices.size();i++) if(editing.packageName.equals(choices.get(i).activityInfo.packageName)){initialSelection=i;break;}
+        final int[] selected={initialSelection}; final TextView selectedLabel=text("已选择："+labels.get(initialSelection),14,INK,true); selectedLabel.setPadding(0,dp(3),0,dp(5)); form.addView(selectedLabel);
         LinearLayout durationLabels=row(); durationLabels.addView(text("小时",12,MUTED,false),new LinearLayout.LayoutParams(0,-2,1)); durationLabels.addView(text("分钟",12,MUTED,false),new LinearLayout.LayoutParams(0,-2,1)); form.addView(durationLabels);
-        LinearLayout pick=row(); NumberPicker hours=new NumberPicker(activity); hours.setMinValue(0); hours.setMaxValue(23); String[] hourLabels=new String[24]; for(int i=0;i<24;i++)hourLabels[i]=String.format(Locale.CHINA,"%02d 小时",i); hours.setDisplayedValues(hourLabels); hours.setValue(1); NumberPicker mins=new NumberPicker(activity); mins.setMinValue(0); mins.setMaxValue(59); String[] minuteLabels=new String[60]; for(int i=0;i<60;i++)minuteLabels[i]=String.format(Locale.CHINA,"%02d 分钟",i); mins.setDisplayedValues(minuteLabels); mins.setValue(0); pick.addView(hours,new LinearLayout.LayoutParams(0,dp(150),1)); pick.addView(mins,new LinearLayout.LayoutParams(0,dp(150),1)); form.addView(pick);
+        int initialMinutes=editing==null?60:(int)Math.max(1L,editing.dailyLimitMillis/60000L);
+        LinearLayout pick=row(); NumberPicker hours=new NumberPicker(activity); hours.setMinValue(0); hours.setMaxValue(23); String[] hourLabels=new String[24]; for(int i=0;i<24;i++)hourLabels[i]=String.format(Locale.CHINA,"%02d 小时",i); hours.setDisplayedValues(hourLabels); hours.setValue(initialMinutes/60); NumberPicker mins=new NumberPicker(activity); mins.setMinValue(0); mins.setMaxValue(59); String[] minuteLabels=new String[60]; for(int i=0;i<60;i++)minuteLabels[i]=String.format(Locale.CHINA,"%02d 分钟",i); mins.setDisplayedValues(minuteLabels); mins.setValue(initialMinutes%60); pick.addView(hours,new LinearLayout.LayoutParams(0,dp(150),1)); pick.addView(mins,new LinearLayout.LayoutParams(0,dp(150),1)); form.addView(pick);
         TextView note=text("达到每日累计时长后，当天会显示限制画面；例如设置 1:00，就是当天累计使用 1 小时。",12,MUTED,false); note.setLineSpacing(dp(3),1f); note.setPadding(0,dp(4),0,0); form.addView(note);
         final Runnable[] render={null}; render[0]=()->{
             appList.removeAllViews(); String query=search.getText().toString().trim().toLowerCase(Locale.CHINA); int shown=0;
@@ -291,7 +295,7 @@ public final class HealthUsageView extends ScrollView {
             if(shown==0){TextView empty=text("没有匹配的应用",13,MUTED,false);empty.setGravity(Gravity.CENTER);appList.addView(empty,new LinearLayout.LayoutParams(-1,dp(48)));}
         };
         render[0].run(); search.addTextChangedListener(new TextWatcher(){public void beforeTextChanged(CharSequence s,int st,int c,int a){} public void onTextChanged(CharSequence s,int st,int b,int c){render[0].run();} public void afterTextChanged(Editable e){}});
-        new AlertDialog.Builder(activity).setTitle("设置应用使用限制").setView(form).setNegativeButton("取消",null).setPositiveButton("保存",(d,w)->{
+        new AlertDialog.Builder(activity).setTitle(editing==null?"设置应用使用限制":"修改应用使用限制").setView(form).setNegativeButton("取消",null).setPositiveButton("保存",(d,w)->{
             int total=hours.getValue()*60+mins.getValue(); if(total<1){Toast.makeText(activity,"时长至少 1 分钟",Toast.LENGTH_SHORT).show();return;}
             String pkg=choices.get(selected[0]).activityInfo.packageName;
             AppLimitStore.upsert(activity,new AppLimit(pkg,total*60000L,true,0,true)); AppLimitService.start(activity); if(snapshot!=null)showSnapshot(snapshot);
