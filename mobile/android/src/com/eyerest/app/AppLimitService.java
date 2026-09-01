@@ -32,6 +32,7 @@ public final class AppLimitService extends Service {
     private WindowManager windowManager;
     private View overlay;
     private String blockedPackage;
+    private long overlayShownAt;
 
     public static void start(Context context) {
         Intent i = new Intent(context, AppLimitService.class);
@@ -49,6 +50,16 @@ public final class AppLimitService extends Service {
         if (!Settings.canDrawOverlays(this)) return;
         String foreground = currentForegroundPackage();
         Log.d(TAG, "foreground=" + foreground);
+        // Showing our overlay can produce a newer UsageEvents record for this
+        // package. Keep the block attached to the limited app until a real
+        // different foreground package is observed.
+        if (overlay != null && getPackageName().equals(foreground)) {
+            foreground = blockedPackage;
+        }
+        if (overlay != null && foreground == null) {
+            if (System.currentTimeMillis() - overlayShownAt < 30_000L) foreground = blockedPackage;
+            else { removeOverlay(); return; }
+        }
         AppLimit matched = null;
         for (AppLimit limit : AppLimitStore.get(this)) if (limit.enabled && limit.packageName.equals(foreground)) { matched = limit; break; }
         if (matched == null) { removeOverlay(); return; }
@@ -84,12 +95,12 @@ public final class AppLimitService extends Service {
             if (stat == null || getPackageName().equals(stat.getPackageName())) continue;
             if (stat.getLastTimeUsed() > latest) { latest = stat.getLastTimeUsed(); best = stat.getPackageName(); }
         }
-        return latest > 0L ? best : null;
+        return latest > 0L && now - latest <= 30_000L ? best : null;
     }
 
     private void showOverlay(String pkg, long limit) {
         if (overlay != null && pkg.equals(blockedPackage)) return;
-        removeOverlay(); blockedPackage = pkg; windowManager = (WindowManager)getSystemService(WINDOW_SERVICE);
+        removeOverlay(); blockedPackage = pkg; overlayShownAt = System.currentTimeMillis(); windowManager = (WindowManager)getSystemService(WINDOW_SERVICE);
         FrameLayout root = new FrameLayout(this); root.setBackgroundColor(Color.argb(245, 18, 32, 27));
         TextView text = new TextView(this); text.setText("今日使用时间已达到上限\n\n请明天再使用"); text.setTextColor(Color.WHITE); text.setTextSize(22); text.setGravity(Gravity.CENTER); text.setPadding(40,40,40,40);
         root.addView(text, new FrameLayout.LayoutParams(-1,-1));
