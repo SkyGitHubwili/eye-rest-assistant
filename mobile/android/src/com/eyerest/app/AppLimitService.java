@@ -22,9 +22,11 @@ import android.widget.TextView;
 import java.util.Calendar;
 import java.util.List;
 import java.util.Map;
+import android.util.Log;
 
 /** Best-effort on-device app limiter. Android does not expose a hard device-admin lock to normal apps. */
 public final class AppLimitService extends Service {
+    private static final String TAG = "AppLimit";
     private static final String CHANNEL = "health_app_limits";
     private final Handler handler = new Handler();
     private WindowManager windowManager;
@@ -46,10 +48,12 @@ public final class AppLimitService extends Service {
         if (!AppLimitStore.hasEnabled(this)) { removeOverlay(); stopSelf(); return; }
         if (!Settings.canDrawOverlays(this)) return;
         String foreground = currentForegroundPackage();
+        Log.d(TAG, "foreground=" + foreground);
         AppLimit matched = null;
         for (AppLimit limit : AppLimitStore.get(this)) if (limit.enabled && limit.packageName.equals(foreground)) { matched = limit; break; }
         if (matched == null) { removeOverlay(); return; }
         long used = usageToday(matched.packageName);
+        Log.d(TAG, "matched=" + matched.packageName + " used=" + used + " limit=" + matched.dailyLimitMillis);
         if (used >= matched.dailyLimitMillis) showOverlay(matched.packageName, matched.dailyLimitMillis);
         else removeOverlay();
     }
@@ -63,13 +67,24 @@ public final class AppLimitService extends Service {
 
     private String currentForegroundPackage() {
         UsageStatsManager manager = (UsageStatsManager)getSystemService(USAGE_STATS_SERVICE); if (manager == null) return null;
-        long now = System.currentTimeMillis(); UsageEvents events = manager.queryEvents(now - 2L * 60L * 1000L, now); if (events == null) return null;
-        UsageEvents.Event event = new UsageEvents.Event(); String current = null;
-        while (events.hasNextEvent()) { events.getNextEvent(event); int type = event.getEventType();
-            if (type == UsageEvents.Event.MOVE_TO_FOREGROUND || type == 23) current = event.getPackageName();
-            else if ((type == UsageEvents.Event.MOVE_TO_BACKGROUND || type == 24) && event.getPackageName().equals(current)) current = null;
+        long now = System.currentTimeMillis(); UsageEvents events = manager.queryEvents(now - 10L * 60L * 1000L, now);
+        String current = null; long currentTime = -1L;
+        if (events != null) {
+            UsageEvents.Event event = new UsageEvents.Event();
+            while (events.hasNextEvent()) { events.getNextEvent(event); int type = event.getEventType(); long time = event.getTimeStamp();
+                if ((type == UsageEvents.Event.MOVE_TO_FOREGROUND || type == 23) && time >= currentTime) { current = event.getPackageName(); currentTime = time; }
+                else if ((type == UsageEvents.Event.MOVE_TO_BACKGROUND || type == 24) && event.getPackageName().equals(current) && time >= currentTime) { current = null; currentTime = time; }
+            }
         }
-        return current;
+        if (current != null) return current;
+        List<UsageStats> values = manager.queryUsageStats(UsageStatsManager.INTERVAL_DAILY, now - 10L * 60L * 1000L, now);
+        if (values == null) return null;
+        String best = null; long latest = 0L;
+        for (UsageStats stat : values) {
+            if (stat == null || getPackageName().equals(stat.getPackageName())) continue;
+            if (stat.getLastTimeUsed() > latest) { latest = stat.getLastTimeUsed(); best = stat.getPackageName(); }
+        }
+        return latest > 0L ? best : null;
     }
 
     private void showOverlay(String pkg, long limit) {
@@ -80,7 +95,8 @@ public final class AppLimitService extends Service {
         root.addView(text, new FrameLayout.LayoutParams(-1,-1));
         int type = Build.VERSION.SDK_INT >= 26 ? WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY : WindowManager.LayoutParams.TYPE_PHONE;
         WindowManager.LayoutParams lp = new WindowManager.LayoutParams(-1,-1,type,WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN | WindowManager.LayoutParams.FLAG_FULLSCREEN,PixelFormat.TRANSLUCENT); lp.gravity = Gravity.TOP|Gravity.START;
-        try { windowManager.addView(root, lp); overlay = root; } catch (RuntimeException ignored) {}
+        try { windowManager.addView(root, lp); overlay = root; Log.d(TAG, "overlay shown for " + pkg); }
+        catch (RuntimeException error) { Log.e(TAG, "overlay failed", error); }
     }
     private void removeOverlay() { if (overlay != null && windowManager != null) { try { windowManager.removeView(overlay); } catch (RuntimeException ignored) {} } overlay = null; blockedPackage = null; }
     private void createChannel() { if (Build.VERSION.SDK_INT >= 26) { NotificationChannel c = new NotificationChannel(CHANNEL,"应用使用限制",NotificationManager.IMPORTANCE_LOW); getSystemService(NotificationManager.class).createNotificationChannel(c); } }
