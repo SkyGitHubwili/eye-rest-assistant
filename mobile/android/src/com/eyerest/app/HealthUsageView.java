@@ -76,7 +76,11 @@ public final class HealthUsageView extends ScrollView {
             loaded=true;snapshot=null;HealthReminderScheduler.cancel(activity);showPermission();return;
         }
         HealthReminderScheduler.schedule(activity);
-        loading=true;showLoading();
+        loading=true;
+        // Keep the last completed snapshot visible while the next query runs.
+        // Rebuilding the whole page here caused a visible flash whenever the
+        // user switched between the Sleep and Health tabs.
+        if(snapshot==null) showLoading();
         manager.refresh(new HealthUsageManager.Callback<HealthModels.HealthSnapshot>(){
             @Override public void onSuccess(HealthModels.HealthSnapshot value){
                 loading=false;loaded=true;snapshot=value;showSnapshot(value);
