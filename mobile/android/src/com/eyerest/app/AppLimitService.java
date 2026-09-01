@@ -29,7 +29,7 @@ public final class AppLimitService extends Service {
     private static final String TAG = "AppLimit";
     private static final String CHANNEL = "health_app_limits";
     // Keep the restriction responsive without spinning a tight loop.
-    private static final long CHECK_INTERVAL_MS = 1_000L;
+    private static final long CHECK_INTERVAL_MS = 250L;
     private final Handler handler = new Handler();
     private WindowManager windowManager;
     private View overlay;
@@ -84,7 +84,7 @@ public final class AppLimitService extends Service {
 
     private String currentForegroundPackage() {
         UsageStatsManager manager = (UsageStatsManager)getSystemService(USAGE_STATS_SERVICE); if (manager == null) return null;
-        long now = System.currentTimeMillis(); UsageEvents events = manager.queryEvents(now - 10L * 60L * 1000L, now);
+        long now = System.currentTimeMillis(); UsageEvents events = manager.queryEvents(now - 60_000L, now);
         String current = null; long currentTime = -1L;
         if (events != null) {
             UsageEvents.Event event = new UsageEvents.Event();
@@ -97,7 +97,7 @@ public final class AppLimitService extends Service {
             }
         }
         if (current != null) return current;
-        List<UsageStats> values = manager.queryUsageStats(UsageStatsManager.INTERVAL_DAILY, now - 10L * 60L * 1000L, now);
+        List<UsageStats> values = manager.queryUsageStats(UsageStatsManager.INTERVAL_DAILY, now - 60_000L, now);
         if (values == null) return null;
         String best = null; long latest = 0L;
         for (UsageStats stat : values) {
