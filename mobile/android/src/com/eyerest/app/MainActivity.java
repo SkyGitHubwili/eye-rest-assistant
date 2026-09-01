@@ -57,6 +57,7 @@ public class MainActivity extends Activity {
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
         prefs = getSharedPreferences("settings", MODE_PRIVATE);
+        if (AppLimitStore.hasEnabled(this)) AppLimitService.start(this);
         if(state!=null)currentPage=state.getInt("current_page",PAGE_EYE);
         else if(PAGE_HEALTH_NAME.equals(getIntent().getStringExtra(EXTRA_PAGE)))currentPage=PAGE_HEALTH;
         else currentPage=Math.max(PAGE_EYE,Math.min(PAGE_HEALTH,prefs.getInt("current_page",PAGE_EYE)));
