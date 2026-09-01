@@ -187,13 +187,15 @@ public final class AppDetailActivity extends Activity {
         // Permission may have been changed in Settings while this detail page
         // was paused, so force a fresh AppOps observation before querying.
         manager.invalidateUsageAccessCache();
+        // Invalidate callbacks from a previous query before handling the new
+        // permission state, preventing stale data from resurfacing on return.
+        final int generation = ++requestGeneration;
         if (!manager.hasUsageAccess()) {
             showState("需要使用情况访问权限",
                 "健康使用需要读取手机的应用使用时间，才能显示此应用的真实统计。",
                 "去开启", this::openUsageSettings);
             return;
         }
-        final int generation = ++requestGeneration;
         showLoading();
         manager.loadAppDetail(packageName, new HealthUsageManager.Callback<HealthModels.AppDetail>() {
             @Override public void onSuccess(HealthModels.AppDetail detail) {

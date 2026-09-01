@@ -173,13 +173,15 @@ public final class HealthDataActivity extends Activity {
         // Re-read AppOps after returning from the system Usage Access page;
         // this avoids showing a stale permission card for the cache window.
         manager.invalidateUsageAccessCache();
+        // Invalidate any callback already in flight before deciding whether
+        // the newly observed permission state is usable.
+        final int generation = ++requestGeneration;
         if (!manager.hasUsageAccess()) {
             showState("需要使用情况访问权限",
                 "健康使用需要读取手机的应用使用时间，才能统计今日使用情况和 App 排行。",
                 "去开启", this::openUsageSettings);
             return;
         }
-        final int generation = ++requestGeneration;
         showLoading();
         manager.refresh(new HealthUsageManager.Callback<HealthModels.HealthSnapshot>() {
             @Override public void onSuccess(HealthModels.HealthSnapshot snapshot) {
