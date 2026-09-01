@@ -41,8 +41,12 @@ public final class AppLimitService extends Service {
     }
     public static void stop(Context context) { try { context.stopService(new Intent(context, AppLimitService.class)); } catch (RuntimeException ignored) {} }
 
-    @Override public void onCreate() { super.onCreate(); createChannel(); startForeground(31, notification()); handler.post(checker); }
-    @Override public int onStartCommand(Intent intent, int flags, int startId) { if (!AppLimitStore.hasEnabled(this)) { stopSelf(); return START_NOT_STICKY; } return START_STICKY; }
+    @Override public void onCreate() { super.onCreate(); createChannel(); startForeground(31, notification()); handler.post(checker); Log.i(TAG, "service created"); }
+    @Override public int onStartCommand(Intent intent, int flags, int startId) {
+        Log.i(TAG, "service command limits=" + AppLimitStore.get(this).size());
+        if (!AppLimitStore.hasEnabled(this)) { stopSelf(); return START_NOT_STICKY; }
+        handler.removeCallbacks(checker); handler.post(checker); return START_STICKY;
+    }
     private final Runnable checker = new Runnable() { @Override public void run() { check(); handler.postDelayed(this, 8000L); } };
 
     private void check() {
@@ -83,8 +87,11 @@ public final class AppLimitService extends Service {
         if (events != null) {
             UsageEvents.Event event = new UsageEvents.Event();
             while (events.hasNextEvent()) { events.getNextEvent(event); int type = event.getEventType(); long time = event.getTimeStamp();
-                if ((type == UsageEvents.Event.MOVE_TO_FOREGROUND || type == 23) && time >= currentTime) { current = event.getPackageName(); currentTime = time; }
-                else if ((type == UsageEvents.Event.MOVE_TO_BACKGROUND || type == 24) && event.getPackageName().equals(current) && time >= currentTime) { current = null; currentTime = time; }
+                // On Android, ACTIVITY_RESUMED shares value 1 with
+                // MOVE_TO_FOREGROUND. ACTIVITY_STOPPED is 23 and must be
+                // treated as background, never as a foreground signal.
+                if (type == UsageEvents.Event.MOVE_TO_FOREGROUND && time >= currentTime) { current = event.getPackageName(); currentTime = time; }
+                else if ((type == UsageEvents.Event.MOVE_TO_BACKGROUND || type == 23 || type == 24) && event.getPackageName().equals(current) && time >= currentTime) { current = null; currentTime = time; }
             }
         }
         if (current != null) return current;
@@ -105,7 +112,13 @@ public final class AppLimitService extends Service {
         TextView text = new TextView(this); text.setText("今日使用时间已达到上限\n\n请明天再使用"); text.setTextColor(Color.WHITE); text.setTextSize(22); text.setGravity(Gravity.CENTER); text.setPadding(40,40,40,40);
         root.addView(text, new FrameLayout.LayoutParams(-1,-1));
         int type = Build.VERSION.SDK_INT >= 26 ? WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY : WindowManager.LayoutParams.TYPE_PHONE;
-        WindowManager.LayoutParams lp = new WindowManager.LayoutParams(-1,-1,type,WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN | WindowManager.LayoutParams.FLAG_FULLSCREEN,PixelFormat.TRANSLUCENT); lp.gravity = Gravity.TOP|Gravity.START;
+        WindowManager.LayoutParams lp = new WindowManager.LayoutParams(-1,-1,type,
+            WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN
+                | WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS
+                | WindowManager.LayoutParams.FLAG_FULLSCREEN,
+            PixelFormat.TRANSLUCENT);
+        lp.gravity = Gravity.TOP|Gravity.START;
+        if (Build.VERSION.SDK_INT >= 28) lp.layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES;
         try { windowManager.addView(root, lp); overlay = root; Log.d(TAG, "overlay shown for " + pkg); }
         catch (RuntimeException error) { Log.e(TAG, "overlay failed", error); }
     }
