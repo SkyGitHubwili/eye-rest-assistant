@@ -78,18 +78,16 @@ public final class HealthUsageView extends ScrollView {
             loaded=true;snapshot=null;HealthReminderScheduler.cancel(activity);showPermission();return;
         }
         HealthReminderScheduler.schedule(activity);
+        final boolean firstLoad=snapshot==null;
         loading=true;
         // Keep the last completed snapshot visible while the next query runs.
         // Rebuilding the whole page here caused a visible flash whenever the
         // user switched between the Sleep and Health tabs.
         if(snapshot==null) showLoading();
-        manager.refresh(new HealthUsageManager.Callback<HealthModels.HealthSnapshot>(){
+        final Runnable query=()->manager.refresh(new HealthUsageManager.Callback<HealthModels.HealthSnapshot>(){
             @Override public void onSuccess(HealthModels.HealthSnapshot value){
-                boolean firstLoad=snapshot==null;
                 loading=false;loaded=true;snapshot=value;
-                if(limitDialogOpen) deferredSnapshot=value;
-                else if(firstLoad) postDelayed(()->{if(!limitDialogOpen&&snapshot==value)showSnapshot(value);},500L);
-                else showSnapshot(value);
+                if(limitDialogOpen) deferredSnapshot=value; else showSnapshot(value);
             }
             @Override public void onError(Throwable error){
                 loading=false;loaded=true;
@@ -97,6 +95,9 @@ public final class HealthUsageView extends ScrollView {
                 else showError();
             }
         });
+        // Let the recreated screen accept the first tap before the initial
+        // usage query can return and trigger a full-page rebuild.
+        if(firstLoad) postDelayed(query,700L); else query.run();
     }
 
     public void destroy(){manager.shutdown();}
@@ -113,6 +114,7 @@ public final class HealthUsageView extends ScrollView {
         TextView label=text("正在整理使用数据…",14,MUTED,false);label.setGravity(Gravity.CENTER);root.addView(label);
         // Keep existing app-limit controls available during the first load
         // after the process is recreated.
+        addGoalCard(null);
         addAppLimitCard(false);
     }
 
