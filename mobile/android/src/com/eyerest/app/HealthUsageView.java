@@ -85,8 +85,11 @@ public final class HealthUsageView extends ScrollView {
         if(snapshot==null) showLoading();
         manager.refresh(new HealthUsageManager.Callback<HealthModels.HealthSnapshot>(){
             @Override public void onSuccess(HealthModels.HealthSnapshot value){
+                boolean firstLoad=snapshot==null;
                 loading=false;loaded=true;snapshot=value;
-                if(limitDialogOpen) deferredSnapshot=value; else showSnapshot(value);
+                if(limitDialogOpen) deferredSnapshot=value;
+                else if(firstLoad) postDelayed(()->{if(!limitDialogOpen&&snapshot==value)showSnapshot(value);},500L);
+                else showSnapshot(value);
             }
             @Override public void onError(Throwable error){
                 loading=false;loaded=true;
