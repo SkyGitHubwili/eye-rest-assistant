@@ -2,6 +2,8 @@ package com.eyerest.app;
 
 import android.app.Activity;
 import android.app.AlertDialog;
+import android.app.usage.UsageStats;
+import android.app.usage.UsageStatsManager;
 import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.content.pm.ResolveInfo;
@@ -14,6 +16,7 @@ import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.Button;
+import android.widget.EditText;
 import android.widget.FrameLayout;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
@@ -22,6 +25,8 @@ import android.widget.ProgressBar;
 import android.widget.ScrollView;
 import android.widget.TextView;
 import android.widget.Toast;
+import android.text.Editable;
+import android.text.TextWatcher;
 
 import java.util.Locale;
 import java.util.ArrayList;
@@ -237,18 +242,59 @@ public final class HealthUsageView extends ScrollView {
             TextView empty=text("暂未设置应用限制",13,MUTED,false); empty.setPadding(0,dp(8),0,dp(4)); panel.addView(empty);
         } else for(AppLimit limit:limits){
             LinearLayout item=row(); item.setPadding(0,dp(8),0,dp(4));
-            TextView name=text(appLabel(limit.packageName),15,INK,true); item.addView(name,new LinearLayout.LayoutParams(0,-2,1));
-            item.addView(text(duration(limit.dailyLimitMillis)+" / 天",13,GREEN,true));
+            ImageView icon=new ImageView(activity); Drawable limitIcon=manager.loadAppIcon(limit.packageName);
+            icon.setImageDrawable(limitIcon!=null?limitIcon:activity.getDrawable(android.R.drawable.sym_def_app_icon));
+            item.addView(icon,new LinearLayout.LayoutParams(dp(38),dp(38)));
+            LinearLayout labels=column(); labels.setPadding(dp(10),0,dp(8),0);
+            labels.addView(text(appLabel(limit.packageName),15,INK,true));
+            labels.addView(text("今日已用 "+duration(usageToday(limit.packageName))+" / 上限 "+duration(limit.dailyLimitMillis),12,MUTED,false));
+            item.addView(labels,new LinearLayout.LayoutParams(0,-2,1));
             Button remove=button("移除",Color.TRANSPARENT,Color.rgb(184,74,53)); remove.setTextSize(12); LinearLayout.LayoutParams rp=new LinearLayout.LayoutParams(dp(56),dp(38)); rp.setMargins(dp(6),0,0,0); item.addView(remove,rp);
             remove.setOnClickListener(v->{AppLimitStore.remove(activity,limit.packageName); if(AppLimitStore.hasEnabled(activity))AppLimitService.start(activity);else AppLimitService.stop(activity); if(snapshot!=null)showSnapshot(snapshot);});
             panel.addView(item);
         }
-        add.setOnClickListener(v->showAppLimitDialog()); addCard(panel);
+        add.setOnClickListener(v->showAppLimitDialogV2()); addCard(panel);
     }
 
     private String appLabel(String pkg){
         try{return String.valueOf(activity.getPackageManager().getApplicationLabel(activity.getPackageManager().getApplicationInfo(pkg,0)));}
         catch(Exception e){return pkg;}
+    }
+
+    private long usageToday(String pkg){
+        UsageStatsManager usage=(UsageStatsManager)activity.getSystemService(Activity.USAGE_STATS_SERVICE);
+        if(usage==null)return 0L;
+        java.util.Calendar day=java.util.Calendar.getInstance(); day.set(java.util.Calendar.HOUR_OF_DAY,0); day.set(java.util.Calendar.MINUTE,0); day.set(java.util.Calendar.SECOND,0); day.set(java.util.Calendar.MILLISECOND,0);
+        java.util.Map<String,UsageStats> values=usage.queryAndAggregateUsageStats(day.getTimeInMillis(),System.currentTimeMillis());
+        UsageStats stat=values==null?null:values.get(pkg); return stat==null?0L:stat.getTotalTimeInForeground();
+    }
+
+    private void showAppLimitDialogV2(){
+        final PackageManager pm=activity.getPackageManager();
+        Intent launcher=new Intent(Intent.ACTION_MAIN); launcher.addCategory(Intent.CATEGORY_LAUNCHER);
+        List<ResolveInfo> apps=pm.queryIntentActivities(launcher,PackageManager.MATCH_ALL);
+        final List<ResolveInfo> choices=new ArrayList<ResolveInfo>(); final List<String> labels=new ArrayList<String>();
+        for(ResolveInfo info:apps){String pkg=info.activityInfo.packageName; if(pkg.equals(activity.getPackageName()))continue; String label=String.valueOf(info.loadLabel(pm)); if(!labels.contains(label)){choices.add(info);labels.add(label);}}
+        if(choices.isEmpty()){Toast.makeText(activity,"没有找到可限制的应用",Toast.LENGTH_SHORT).show();return;}
+        LinearLayout form=column(); form.setPadding(dp(20),dp(2),dp(20),0);
+        TextView mode=text("每日累计使用时长（不是时间段）",13,GREEN,true); mode.setPadding(0,0,0,dp(6)); form.addView(mode);
+        EditText search=new EditText(activity); search.setSingleLine(true); search.setHint("搜索应用"); search.setTextSize(15); search.setPadding(dp(12),0,dp(12),0); search.setBackground(round(Color.rgb(243,246,242),10)); form.addView(search,new LinearLayout.LayoutParams(-1,dp(50)));
+        ScrollView appScroll=new ScrollView(activity); LinearLayout appList=column(); appScroll.addView(appList,new ScrollView.LayoutParams(-1,-2)); LinearLayout.LayoutParams appScrollParams=new LinearLayout.LayoutParams(-1,dp(220)); appScrollParams.setMargins(0,dp(6),0,dp(6)); form.addView(appScroll,appScrollParams);
+        final int[] selected={0}; final TextView selectedLabel=text("已选择："+labels.get(0),14,INK,true); selectedLabel.setPadding(0,dp(3),0,dp(5)); form.addView(selectedLabel);
+        LinearLayout pick=row(); NumberPicker hours=new NumberPicker(activity); hours.setMinValue(0); hours.setMaxValue(23); hours.setValue(1); NumberPicker mins=new NumberPicker(activity); mins.setMinValue(0); mins.setMaxValue(59); mins.setValue(0); pick.addView(hours,new LinearLayout.LayoutParams(0,dp(150),1)); TextView colon=text(":",20,INK,true);colon.setGravity(Gravity.CENTER);pick.addView(colon,new LinearLayout.LayoutParams(dp(18),dp(150))); pick.addView(mins,new LinearLayout.LayoutParams(0,dp(150),1)); form.addView(pick);
+        TextView note=text("达到每日累计时长后，当天会显示限制画面；例如设置 1:00，就是当天累计使用 1 小时。",12,MUTED,false); note.setLineSpacing(dp(3),1f); note.setPadding(0,dp(4),0,0); form.addView(note);
+        final Runnable[] render={null}; render[0]=()->{
+            appList.removeAllViews(); String query=search.getText().toString().trim().toLowerCase(Locale.CHINA); int shown=0;
+            for(int i=0;i<choices.size();i++){String label=labels.get(i); if(query.length()>0&&!label.toLowerCase(Locale.CHINA).contains(query))continue; final int index=i;
+                LinearLayout appRow=row(); appRow.setPadding(0,dp(5),0,dp(5)); ImageView icon=new ImageView(activity); icon.setImageDrawable(choices.get(i).loadIcon(pm)); appRow.addView(icon,new LinearLayout.LayoutParams(dp(40),dp(40))); TextView name=text(label,15,INK,false); name.setPadding(dp(10),0,0,0); appRow.addView(name,new LinearLayout.LayoutParams(0,dp(46),1)); appRow.setOnClickListener(v->{selected[0]=index;selectedLabel.setText("已选择："+labels.get(index));}); appList.addView(appRow); shown++; }
+            if(shown==0){TextView empty=text("没有匹配的应用",13,MUTED,false);empty.setGravity(Gravity.CENTER);appList.addView(empty,new LinearLayout.LayoutParams(-1,dp(48)));}
+        };
+        render[0].run(); search.addTextChangedListener(new TextWatcher(){public void beforeTextChanged(CharSequence s,int st,int c,int a){} public void onTextChanged(CharSequence s,int st,int b,int c){render[0].run();} public void afterTextChanged(Editable e){}});
+        new AlertDialog.Builder(activity).setTitle("设置应用使用限制").setView(form).setNegativeButton("取消",null).setPositiveButton("保存",(d,w)->{
+            int total=hours.getValue()*60+mins.getValue(); if(total<1){Toast.makeText(activity,"时长至少 1 分钟",Toast.LENGTH_SHORT).show();return;}
+            String pkg=choices.get(selected[0]).activityInfo.packageName;
+            AppLimitStore.upsert(activity,new AppLimit(pkg,total*60000L,true,0,true)); AppLimitService.start(activity); if(snapshot!=null)showSnapshot(snapshot);
+        }).show();
     }
 
     private void showAppLimitDialog(){
