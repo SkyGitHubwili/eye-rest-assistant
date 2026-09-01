@@ -105,6 +105,9 @@ public final class HealthUsageView extends ScrollView {
         root.removeAllViews();addHeader(false);
         ProgressBar progress=new ProgressBar(activity);root.addView(progress,new LinearLayout.LayoutParams(-1,dp(52)));
         TextView label=text("正在整理使用数据…",14,MUTED,false);label.setGravity(Gravity.CENTER);root.addView(label);
+        // Keep existing app-limit controls available during the first load
+        // after the process is recreated.
+        addAppLimitCard(false);
     }
 
     private void showPermission(){
@@ -141,7 +144,7 @@ public final class HealthUsageView extends ScrollView {
             TextView hint=text("系统尚未返回今天的应用使用记录。你可以稍后手动刷新。",14,MUTED,false);
             hint.setPadding(0,dp(10),0,dp(16));empty.addView(hint);
             Button retry=button("刷新数据",GREEN,Color.WHITE);retry.setOnClickListener(v->refreshData());empty.addView(retry,new LinearLayout.LayoutParams(-1,dp(48)));
-            addCard(empty);addGoalCard(value);addAppLimitCard();return;
+            addCard(empty);addGoalCard(value);addAppLimitCard(true);return;
         }
 
         LinearLayout today=card();today.setBackground(round(Color.rgb(233,243,236),22));
@@ -152,7 +155,7 @@ public final class HealthUsageView extends ScrollView {
         comparison.setGravity(Gravity.CENTER);today.addView(comparison);addCard(today);
 
         addGoalCard(value);
-        addAppLimitCard();
+        addAppLimitCard(true);
         addRanking(value);
         addUsageSignals(value);
         addScore(value.healthScore);
@@ -235,7 +238,7 @@ public final class HealthUsageView extends ScrollView {
         addCard(panel);
     }
 
-    private void addAppLimitCard(){
+    private void addAppLimitCard(boolean usageReady){
         LinearLayout panel=card();
         LinearLayout heading=row();
         heading.addView(text("应用使用限制",18,INK,true),new LinearLayout.LayoutParams(0,-2,1));
@@ -251,7 +254,7 @@ public final class HealthUsageView extends ScrollView {
             item.addView(icon,new LinearLayout.LayoutParams(dp(38),dp(38)));
             LinearLayout labels=column(); labels.setPadding(dp(10),0,dp(8),0);
             labels.addView(text(appLabel(limit.packageName),15,INK,true));
-            labels.addView(text("今日已用 "+duration(usageToday(limit.packageName))+" / 上限 "+duration(limit.dailyLimitMillis),12,MUTED,false));
+            labels.addView(text(usageReady?"今日已用 "+duration(usageToday(limit.packageName))+" / 上限 "+duration(limit.dailyLimitMillis):"正在读取今日使用 / 上限 "+duration(limit.dailyLimitMillis),12,MUTED,false));
             item.addView(labels,new LinearLayout.LayoutParams(0,-2,1));
             Button remove=button("移除",Color.TRANSPARENT,Color.rgb(184,74,53)); remove.setTextSize(12); LinearLayout.LayoutParams rp=new LinearLayout.LayoutParams(dp(56),dp(38)); rp.setMargins(dp(6),0,0,0); item.addView(remove,rp);
             item.setOnClickListener(v->showAppLimitDialogV2(limit));
