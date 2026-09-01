@@ -79,6 +79,13 @@ public final class HealthDataActivity extends Activity {
     private View buildScreen() {
         LinearLayout root = column();
         root.setBackgroundColor(BACKGROUND);
+        root.setOnApplyWindowInsetsListener((view, insets) -> {
+            int top = insets.getSystemWindowInsetTop();
+            int bottom = insets.getSystemWindowInsetBottom();
+            view.setPadding(insets.getSystemWindowInsetLeft(), top,
+                insets.getSystemWindowInsetRight(), bottom);
+            return insets;
+        });
 
         LinearLayout toolbar = row();
         toolbar.setPadding(dp(10), dp(6), dp(16), dp(6));

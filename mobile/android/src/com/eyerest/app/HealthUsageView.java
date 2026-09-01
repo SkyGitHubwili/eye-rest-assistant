@@ -3,6 +3,8 @@ package com.eyerest.app;
 import android.app.Activity;
 import android.app.AlertDialog;
 import android.content.Intent;
+import android.content.pm.PackageManager;
+import android.content.pm.ResolveInfo;
 import android.graphics.Color;
 import android.graphics.Typeface;
 import android.graphics.drawable.Drawable;
@@ -22,6 +24,8 @@ import android.widget.TextView;
 import android.widget.Toast;
 
 import java.util.Locale;
+import java.util.ArrayList;
+import java.util.List;
 
 /** Health usage page. All statistics are supplied by HealthUsageManager off the UI thread. */
 public final class HealthUsageView extends ScrollView {
@@ -59,6 +63,7 @@ public final class HealthUsageView extends ScrollView {
 
     public void refreshData(){
         if(loading)return;
+        if(AppLimitStore.hasEnabled(activity)) AppLimitService.start(activity);
         // The user may have just toggled Usage Access in Settings. Do not let
         // a short-lived cached AppOps result keep the permission card visible.
         manager.invalidateUsageAccessCache();
@@ -127,7 +132,7 @@ public final class HealthUsageView extends ScrollView {
             TextView hint=text("系统尚未返回今天的应用使用记录。你可以稍后手动刷新。",14,MUTED,false);
             hint.setPadding(0,dp(10),0,dp(16));empty.addView(hint);
             Button retry=button("刷新数据",GREEN,Color.WHITE);retry.setOnClickListener(v->refreshData());empty.addView(retry,new LinearLayout.LayoutParams(-1,dp(48)));
-            addCard(empty);addGoalCard(value);return;
+            addCard(empty);addGoalCard(value);addAppLimitCard();return;
         }
 
         LinearLayout today=card();today.setBackground(round(Color.rgb(233,243,236),22));
@@ -138,6 +143,7 @@ public final class HealthUsageView extends ScrollView {
         comparison.setGravity(Gravity.CENTER);today.addView(comparison);addCard(today);
 
         addGoalCard(value);
+        addAppLimitCard();
         addRanking(value);
         addUsageSignals(value);
         addScore(value.healthScore);
@@ -206,8 +212,7 @@ public final class HealthUsageView extends ScrollView {
 
     private void addUsageSignals(HealthModels.HealthSnapshot value){
         LinearLayout panel=card();
-        LinearLayout heading=row();heading.addView(text("使用节奏",18,INK,true),new LinearLayout.LayoutParams(0,-2,1));
-        Button setting=button("提醒设置",Color.TRANSPARENT,GREEN);setting.setTextSize(12);heading.addView(setting,new LinearLayout.LayoutParams(dp(92),dp(40)));panel.addView(heading);
+        LinearLayout heading=row();heading.addView(text("使用节奏",18,INK,true));panel.addView(heading);
         int threshold=manager.getSettings().getContinuousReminderMinutes();
         long longest=value.today.longestContinuousMillis;
         TextView longestTitle=text("最长连续使用",12,MUTED,false);longestTitle.setPadding(0,dp(14),0,0);panel.addView(longestTitle);
@@ -218,7 +223,50 @@ public final class HealthUsageView extends ScrollView {
         String launches=value.today.launchCountsAvailable?String.valueOf(value.today.totalLaunchCount):"数据不可用";
         panel.addView(metricRow("今日 App 打开次数",launches));
         if(value.today.continuousUsageAvailable&&value.today.currentContinuousMillis>0)panel.addView(metricRow("当前连续使用",duration(value.today.currentContinuousMillis)));
-        setting.setOnClickListener(v->showReminderDialog());addCard(panel);
+        addCard(panel);
+    }
+
+    private void addAppLimitCard(){
+        LinearLayout panel=card();
+        LinearLayout heading=row();
+        heading.addView(text("应用使用限制",18,INK,true),new LinearLayout.LayoutParams(0,-2,1));
+        Button add=button("添加应用",Color.TRANSPARENT,GREEN); add.setTextSize(12); heading.addView(add,new LinearLayout.LayoutParams(dp(92),dp(40))); panel.addView(heading);
+        TextView hint=text("选择某个 App 并设置每日可使用时长，达到上限后会显示限制画面。",13,MUTED,false); hint.setPadding(0,dp(7),0,dp(8)); panel.addView(hint);
+        List<AppLimit> limits=AppLimitStore.get(activity);
+        if(limits.isEmpty()){
+            TextView empty=text("暂未设置应用限制",13,MUTED,false); empty.setPadding(0,dp(8),0,dp(4)); panel.addView(empty);
+        } else for(AppLimit limit:limits){
+            LinearLayout item=row(); item.setPadding(0,dp(8),0,dp(4));
+            TextView name=text(appLabel(limit.packageName),15,INK,true); item.addView(name,new LinearLayout.LayoutParams(0,-2,1));
+            item.addView(text(duration(limit.dailyLimitMillis)+" / 天",13,GREEN,true));
+            Button remove=button("移除",Color.TRANSPARENT,Color.rgb(184,74,53)); remove.setTextSize(12); LinearLayout.LayoutParams rp=new LinearLayout.LayoutParams(dp(56),dp(38)); rp.setMargins(dp(6),0,0,0); item.addView(remove,rp);
+            remove.setOnClickListener(v->{AppLimitStore.remove(activity,limit.packageName); if(AppLimitStore.hasEnabled(activity))AppLimitService.start(activity);else AppLimitService.stop(activity); if(snapshot!=null)showSnapshot(snapshot);});
+            panel.addView(item);
+        }
+        add.setOnClickListener(v->showAppLimitDialog()); addCard(panel);
+    }
+
+    private String appLabel(String pkg){
+        try{return String.valueOf(activity.getPackageManager().getApplicationLabel(activity.getPackageManager().getApplicationInfo(pkg,0)));}
+        catch(Exception e){return pkg;}
+    }
+
+    private void showAppLimitDialog(){
+        PackageManager pm=activity.getPackageManager();
+        Intent launcher=new Intent(Intent.ACTION_MAIN); launcher.addCategory(Intent.CATEGORY_LAUNCHER);
+        List<ResolveInfo> apps=pm.queryIntentActivities(launcher,PackageManager.MATCH_ALL);
+        final List<ResolveInfo> choices=new ArrayList<ResolveInfo>(); final List<String> labels=new ArrayList<String>();
+        for(ResolveInfo info:apps){String pkg=info.activityInfo.packageName; if(pkg.equals(activity.getPackageName()))continue; if(!labels.contains(String.valueOf(info.loadLabel(pm)))){choices.add(info);labels.add(String.valueOf(info.loadLabel(pm)));}}
+        if(choices.isEmpty()){Toast.makeText(activity,"没有找到可限制的应用",Toast.LENGTH_SHORT).show();return;}
+        LinearLayout form=column(); form.setPadding(dp(20),dp(4),dp(20),0);
+        android.widget.Spinner appSpinner=new android.widget.Spinner(activity); appSpinner.setAdapter(new android.widget.ArrayAdapter<String>(activity,android.R.layout.simple_spinner_dropdown_item,labels)); form.addView(appSpinner,new LinearLayout.LayoutParams(-1,dp(52)));
+        LinearLayout pick=row(); NumberPicker hours=new NumberPicker(activity); hours.setMinValue(0); hours.setMaxValue(23); hours.setValue(1); NumberPicker mins=new NumberPicker(activity); mins.setMinValue(0); mins.setMaxValue(59); mins.setValue(0); pick.addView(hours,new LinearLayout.LayoutParams(0,dp(150),1)); TextView colon=text(":",20,INK,true);colon.setGravity(Gravity.CENTER);pick.addView(colon,new LinearLayout.LayoutParams(dp(18),dp(150))); pick.addView(mins,new LinearLayout.LayoutParams(0,dp(150),1)); form.addView(pick);
+        TextView note=text("每日 0:01 至 23:59 可选，达到后当天无法继续使用该 App。",12,MUTED,false); note.setPadding(0,dp(4),0,0); form.addView(note);
+        new AlertDialog.Builder(activity).setTitle("设置应用使用限制").setView(form).setNegativeButton("取消",null).setPositiveButton("保存",(d,w)->{
+            int total=hours.getValue()*60+mins.getValue(); if(total<1){Toast.makeText(activity,"时长至少 1 分钟",Toast.LENGTH_SHORT).show();return;}
+            String pkg=choices.get(appSpinner.getSelectedItemPosition()).activityInfo.packageName;
+            AppLimitStore.upsert(activity,new AppLimit(pkg,total*60000L,true,0,true)); AppLimitService.start(activity); if(snapshot!=null)showSnapshot(snapshot);
+        }).show();
     }
 
     private void addScore(HealthModels.HealthScore score){

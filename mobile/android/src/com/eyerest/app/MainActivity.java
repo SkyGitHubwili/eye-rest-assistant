@@ -123,7 +123,8 @@ public class MainActivity extends Activity {
         pages.addView(healthPage,new FrameLayout.LayoutParams(-1,-1));
 
         LinearLayout sleepHeader=row();
-        TextView moon=text("☾",42,Color.rgb(92,25,34),false);moon.setGravity(Gravity.CENTER);
+        ImageView moon=new ImageView(this); moon.setImageResource(R.drawable.ic_sleep_moon);
+        moon.setScaleType(ImageView.ScaleType.CENTER_INSIDE); moon.setContentDescription("睡眠助手");
         sleepHeader.addView(moon,new LinearLayout.LayoutParams(dp(54),dp(54)));
         LinearLayout sleepTitles=column();sleepTitles.setPadding(dp(12),0,0,0);
         sleepTitles.addView(text("睡眠",25,INK,true));

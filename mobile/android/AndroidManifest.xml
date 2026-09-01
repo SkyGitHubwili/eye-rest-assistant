@@ -53,6 +53,15 @@
                 android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
                 android:value="Scheduled sleep warning and full-screen sleep assistant" />
         </service>
+        <service
+            android:name=".AppLimitService"
+            android:exported="false"
+            android:stopWithTask="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Daily app usage limit enforcement" />
+        </service>
         <receiver
             android:name=".BootReceiver"
             android:enabled="true"

@@ -1,0 +1,90 @@
+package com.eyerest.app;
+
+import android.app.Notification;
+import android.app.NotificationChannel;
+import android.app.NotificationManager;
+import android.app.Service;
+import android.app.usage.UsageEvents;
+import android.app.usage.UsageStats;
+import android.app.usage.UsageStatsManager;
+import android.content.Context;
+import android.content.Intent;
+import android.graphics.Color;
+import android.graphics.PixelFormat;
+import android.os.Build;
+import android.os.Handler;
+import android.provider.Settings;
+import android.view.Gravity;
+import android.view.View;
+import android.view.WindowManager;
+import android.widget.FrameLayout;
+import android.widget.TextView;
+import java.util.Calendar;
+import java.util.List;
+import java.util.Map;
+
+/** Best-effort on-device app limiter. Android does not expose a hard device-admin lock to normal apps. */
+public final class AppLimitService extends Service {
+    private static final String CHANNEL = "health_app_limits";
+    private final Handler handler = new Handler();
+    private WindowManager windowManager;
+    private View overlay;
+    private String blockedPackage;
+
+    public static void start(Context context) {
+        Intent i = new Intent(context, AppLimitService.class);
+        try { if (Build.VERSION.SDK_INT >= 26) context.startForegroundService(i); else context.startService(i); }
+        catch (RuntimeException ignored) {}
+    }
+    public static void stop(Context context) { try { context.stopService(new Intent(context, AppLimitService.class)); } catch (RuntimeException ignored) {} }
+
+    @Override public void onCreate() { super.onCreate(); createChannel(); startForeground(31, notification()); handler.post(checker); }
+    @Override public int onStartCommand(Intent intent, int flags, int startId) { if (!AppLimitStore.hasEnabled(this)) { stopSelf(); return START_NOT_STICKY; } return START_STICKY; }
+    private final Runnable checker = new Runnable() { @Override public void run() { check(); handler.postDelayed(this, 8000L); } };
+
+    private void check() {
+        if (!AppLimitStore.hasEnabled(this)) { removeOverlay(); stopSelf(); return; }
+        if (!Settings.canDrawOverlays(this)) return;
+        String foreground = currentForegroundPackage();
+        AppLimit matched = null;
+        for (AppLimit limit : AppLimitStore.get(this)) if (limit.enabled && limit.packageName.equals(foreground)) { matched = limit; break; }
+        if (matched == null) { removeOverlay(); return; }
+        long used = usageToday(matched.packageName);
+        if (used >= matched.dailyLimitMillis) showOverlay(matched.packageName, matched.dailyLimitMillis);
+        else removeOverlay();
+    }
+
+    private long usageToday(String pkg) {
+        UsageStatsManager manager = (UsageStatsManager)getSystemService(USAGE_STATS_SERVICE); if (manager == null) return 0L;
+        Calendar day = Calendar.getInstance(); day.set(Calendar.HOUR_OF_DAY,0); day.set(Calendar.MINUTE,0); day.set(Calendar.SECOND,0); day.set(Calendar.MILLISECOND,0);
+        Map<String, UsageStats> stats = manager.queryAndAggregateUsageStats(day.getTimeInMillis(), System.currentTimeMillis());
+        UsageStats value = stats == null ? null : stats.get(pkg); return value == null ? 0L : value.getTotalTimeInForeground();
+    }
+
+    private String currentForegroundPackage() {
+        UsageStatsManager manager = (UsageStatsManager)getSystemService(USAGE_STATS_SERVICE); if (manager == null) return null;
+        long now = System.currentTimeMillis(); UsageEvents events = manager.queryEvents(now - 2L * 60L * 1000L, now); if (events == null) return null;
+        UsageEvents.Event event = new UsageEvents.Event(); String current = null;
+        while (events.hasNextEvent()) { events.getNextEvent(event); int type = event.getEventType();
+            if (type == UsageEvents.Event.MOVE_TO_FOREGROUND || type == 23) current = event.getPackageName();
+            else if ((type == UsageEvents.Event.MOVE_TO_BACKGROUND || type == 24) && event.getPackageName().equals(current)) current = null;
+        }
+        return current;
+    }
+
+    private void showOverlay(String pkg, long limit) {
+        if (overlay != null && pkg.equals(blockedPackage)) return;
+        removeOverlay(); blockedPackage = pkg; windowManager = (WindowManager)getSystemService(WINDOW_SERVICE);
+        FrameLayout root = new FrameLayout(this); root.setBackgroundColor(Color.argb(245, 18, 32, 27));
+        TextView text = new TextView(this); text.setText("今日使用时间已达到上限\n\n请明天再使用"); text.setTextColor(Color.WHITE); text.setTextSize(22); text.setGravity(Gravity.CENTER); text.setPadding(40,40,40,40);
+        root.addView(text, new FrameLayout.LayoutParams(-1,-1));
+        int type = Build.VERSION.SDK_INT >= 26 ? WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY : WindowManager.LayoutParams.TYPE_PHONE;
+        WindowManager.LayoutParams lp = new WindowManager.LayoutParams(-1,-1,type,WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN | WindowManager.LayoutParams.FLAG_FULLSCREEN,PixelFormat.TRANSLUCENT); lp.gravity = Gravity.TOP|Gravity.START;
+        try { windowManager.addView(root, lp); overlay = root; } catch (RuntimeException ignored) {}
+    }
+    private void removeOverlay() { if (overlay != null && windowManager != null) { try { windowManager.removeView(overlay); } catch (RuntimeException ignored) {} } overlay = null; blockedPackage = null; }
+    private void createChannel() { if (Build.VERSION.SDK_INT >= 26) { NotificationChannel c = new NotificationChannel(CHANNEL,"应用使用限制",NotificationManager.IMPORTANCE_LOW); getSystemService(NotificationManager.class).createNotificationChannel(c); } }
+    private Notification notification() { return new Notification.Builder(this, CHANNEL).setSmallIcon(R.mipmap.ic_launcher).setContentTitle("应用使用限制已开启").setContentText("达到每日上限后会显示限制提示").setOngoing(true).build(); }
+    @Override public void onDestroy() { handler.removeCallbacks(checker); removeOverlay(); super.onDestroy(); }
+    @Override public android.os.IBinder onBind(Intent intent) { return null; }
+}

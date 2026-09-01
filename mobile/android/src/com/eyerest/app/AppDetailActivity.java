@@ -87,6 +87,11 @@ public final class AppDetailActivity extends Activity {
     private View buildScreen() {
         LinearLayout root = column();
         root.setBackgroundColor(BACKGROUND);
+        root.setOnApplyWindowInsetsListener((view, insets) -> {
+            view.setPadding(insets.getSystemWindowInsetLeft(), insets.getSystemWindowInsetTop(),
+                insets.getSystemWindowInsetRight(), insets.getSystemWindowInsetBottom());
+            return insets;
+        });
 
         LinearLayout toolbar = row();
         toolbar.setPadding(dp(10), dp(6), dp(16), dp(6));
