@@ -285,6 +285,7 @@ public final class HealthUsageView extends ScrollView {
         if(editing!=null) for(int i=0;i<choices.size();i++) if(editing.packageName.equals(choices.get(i).activityInfo.packageName)){initialSelection=i;break;}
         final int[] selected={initialSelection}; final TextView selectedLabel=text("已选择："+labels.get(initialSelection),14,INK,true); selectedLabel.setPadding(0,dp(3),0,dp(5)); form.addView(selectedLabel);
         if(editing!=null){
+            mode.setVisibility(View.GONE);
             search.setVisibility(View.GONE);
             appScroll.setVisibility(View.GONE);
             selectedLabel.setVisibility(View.GONE);
