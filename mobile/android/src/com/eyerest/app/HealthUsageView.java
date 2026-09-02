@@ -33,6 +33,8 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 /** Health usage page. All statistics are supplied by HealthUsageManager off the UI thread. */
 public final class HealthUsageView extends ScrollView {
@@ -47,14 +49,26 @@ public final class HealthUsageView extends ScrollView {
     private boolean loaded;
     private boolean loading;
     private boolean pageBuilt;
+    private boolean firstFrameReady;
+    private boolean refreshQueued;
     private TextView todayTotalView, todayComparisonView;
     private TextView goalValuesView, goalRemainingView;
     private ProgressBar goalProgress;
     private LinearLayout appLimitList, rankingList, signalsContent, scoreContent;
     private final Map<String, TextView> appLimitUsageViews = new HashMap<String, TextView>();
     private final Map<String, Long> latestAppUsage = new HashMap<String, Long>();
+    private final Map<String, Drawable> appIconCache = new HashMap<String, Drawable>();
+    private final ExecutorService iconExecutor = Executors.newFixedThreadPool(2);
     private boolean appLimitUsageReady;
     private float pullStartY=-1f;
+    private final Runnable firstFrameGate = () -> {
+        if (!isAttachedToWindow()) return;
+        firstFrameReady = true;
+        if (refreshQueued) {
+            refreshQueued = false;
+            refreshData();
+        }
+    };
 
     public HealthUsageView(Activity activity){
         super(activity);
@@ -78,15 +92,25 @@ public final class HealthUsageView extends ScrollView {
 
     @Override protected void onAttachedToWindow(){
         super.onAttachedToWindow();
-        if(!loaded&&!loading)refreshData();
+        if (!firstFrameReady) {
+            refreshQueued = true;
+            // Let Android draw the interactive shell before UsageStats work
+            // and icon callbacks can compete with the first user tap.
+            postDelayed(firstFrameGate, 180L);
+        } else if(!loaded&&!loading) refreshData();
     }
 
     @Override protected void onDetachedFromWindow(){
+        removeCallbacks(firstFrameGate);
         manager.cancelPending();
         super.onDetachedFromWindow();
     }
 
     public void refreshData(){
+        if (!firstFrameReady) {
+            refreshQueued = true;
+            return;
+        }
         if(loading)return;
         if(AppLimitStore.hasEnabled(activity)) AppLimitService.start(activity);
         // The user may have just toggled Usage Access in Settings. Do not let
@@ -113,7 +137,11 @@ public final class HealthUsageView extends ScrollView {
         query.run();
     }
 
-    public void destroy(){manager.shutdown();}
+    public void destroy(){
+        removeCallbacks(firstFrameGate);
+        iconExecutor.shutdownNow();
+        manager.shutdown();
+    }
 
     /** Build the interactive shell once; later snapshots only update its data views. */
     private void buildInteractivePage(){
@@ -256,8 +284,9 @@ public final class HealthUsageView extends ScrollView {
         for(int i=0;i<count;i++){
             HealthModels.AppUsage app=value.topApps.get(i);
             LinearLayout item=row();item.setPadding(0,dp(14),0,dp(8));
-            ImageView icon=new ImageView(activity);Drawable drawable=manager.loadAppIcon(app.packageName);
-            icon.setImageDrawable(drawable!=null?drawable:activity.getDrawable(android.R.drawable.sym_def_app_icon));
+            ImageView icon=new ImageView(activity);
+            icon.setImageResource(android.R.drawable.sym_def_app_icon);
+            loadAppIconAsync(icon,app.packageName);
             icon.setContentDescription(app.appName);item.addView(icon,new LinearLayout.LayoutParams(dp(38),dp(38)));
             LinearLayout details=column();details.setPadding(dp(11),0,0,0);
             LinearLayout line=row();TextView name=text(app.appName,14,INK,true);name.setSingleLine(true);line.addView(name,new LinearLayout.LayoutParams(0,-2,1));
@@ -265,7 +294,11 @@ public final class HealthUsageView extends ScrollView {
             ProgressBar bar=new ProgressBar(activity,null,android.R.attr.progressBarStyleHorizontal);bar.setMax(1000);bar.setProgress((int)(app.usageMillis*1000L/max));bar.setProgressTintList(android.content.res.ColorStateList.valueOf(GREEN));
             LinearLayout.LayoutParams barParams=new LinearLayout.LayoutParams(-1,dp(8));barParams.setMargins(0,dp(7),0,0);details.addView(bar,barParams);
             item.addView(details,new LinearLayout.LayoutParams(0,-2,1));
-            item.setBackground(round(Color.TRANSPARENT,12));item.setClickable(true);item.setFocusable(true);
+            item.setBackground(round(Color.TRANSPARENT,12));
+            // These rows are touch targets, but must not become the first
+            // focusable child when async stats arrive; that would make the
+            // parent ScrollView jump away from the controls just tapped.
+            item.setClickable(true);
             item.setOnClickListener(v->{Intent intent=new Intent(activity,AppDetailActivity.class).putExtra(AppDetailActivity.EXTRA_PACKAGE_NAME,app.packageName);activity.startActivity(intent);});
             rankingList.addView(item);
         }
@@ -314,8 +347,9 @@ public final class HealthUsageView extends ScrollView {
         }
         for(AppLimit limit:limits){
             LinearLayout item=row(); item.setPadding(0,dp(8),0,dp(4));
-            ImageView icon=new ImageView(activity); Drawable limitIcon=manager.loadAppIcon(limit.packageName);
-            icon.setImageDrawable(limitIcon!=null?limitIcon:activity.getDrawable(android.R.drawable.sym_def_app_icon));
+            ImageView icon=new ImageView(activity);
+            icon.setImageResource(android.R.drawable.sym_def_app_icon);
+            loadAppIconAsync(icon,limit.packageName);
             item.addView(icon,new LinearLayout.LayoutParams(dp(38),dp(38)));
             LinearLayout labels=column(); labels.setPadding(dp(10),0,dp(8),0);
             labels.addView(text(appLabel(limit.packageName),15,INK,true));
@@ -340,6 +374,33 @@ public final class HealthUsageView extends ScrollView {
                 ?latestAppUsage.get(limit.packageName):usageToday(limit.packageName);
             entry.getValue().setText(ready?"今日已用 "+duration(used)+" / 上限 "+duration(limit.dailyLimitMillis):"正在读取今日使用 / 上限 "+duration(limit.dailyLimitMillis));
         }
+    }
+
+    /** PackageManager icon lookup can block for vendor packages; keep it off the UI thread. */
+    private void loadAppIconAsync(final ImageView view, final String packageName) {
+        if (view == null || packageName == null || packageName.length() == 0) return;
+        view.setTag(packageName);
+        Drawable cached;
+        synchronized (appIconCache) { cached = appIconCache.get(packageName); }
+        if (cached != null) {
+            view.setImageDrawable(cached.getConstantState() == null
+                ? cached : cached.getConstantState().newDrawable());
+            return;
+        }
+        iconExecutor.execute(() -> {
+            Drawable icon = manager.loadAppIcon(packageName);
+            if (icon == null) return;
+            synchronized (appIconCache) { appIconCache.put(packageName, icon); }
+            activity.runOnUiThread(() -> {
+                if (activity.isFinishing() || !packageName.equals(view.getTag())) return;
+                Drawable value;
+                synchronized (appIconCache) { value = appIconCache.get(packageName); }
+                if (value != null) {
+                    view.setImageDrawable(value.getConstantState() == null
+                        ? value : value.getConstantState().newDrawable());
+                }
+            });
+        });
     }
 
     private String appLabel(String pkg){
