@@ -28,6 +28,24 @@ public final class UsageStatsCalculator {
         boolean usageStatsAvailable,
         boolean eventsAvailable
     ) {
+        return calculateDay(dayStartMillis, rangeEndMillis, stats, events, metadata,
+            usageStatsAvailable, eventsAvailable, false);
+    }
+
+    /**
+     * Calculate a day, optionally preferring real foreground intervals. Today
+     * uses this mode; historical days retain the faster UsageStats source.
+     */
+    public HealthModels.DayUsage calculateDay(
+        long dayStartMillis,
+        long rangeEndMillis,
+        List<HealthModels.AppUsageStatRecord> stats,
+        List<HealthModels.UsageEventRecord> events,
+        Map<String, HealthModels.AppMetadata> metadata,
+        boolean usageStatsAvailable,
+        boolean eventsAvailable,
+        boolean preferEventDurations
+    ) {
         long end = Math.max(dayStartMillis, rangeEndMillis);
         long rangeLength = Math.max(0L, end - dayStartMillis);
         List<HealthModels.UsageInterval> intervals =
@@ -75,9 +93,15 @@ public final class UsageStatsCalculator {
         for (String packageName : packages) {
             long statDuration = value(statDurations, packageName);
             long eventDuration = value(eventDurations, packageName);
-            // UsageStats is the official duration source. UsageEvents is a real-data fallback
-            // for ROMs that omit a package from the aggregate result.
-            long duration = usageStatsAvailable && statDuration > 0L ? statDuration : eventDuration;
+            // Today is derived from clipped foreground intervals. Historical
+            // days keep UsageStats as the primary source for performance, with
+            // event intervals filling gaps when a ROM omits a package.
+            long duration;
+            if(preferEventDurations && eventsAvailable && hasEventEvidence){
+                duration=eventDuration>0L?eventDuration:statDuration;
+            }else{
+                duration=usageStatsAvailable&&statDuration>0L?statDuration:eventDuration;
+            }
             duration = Math.min(rangeLength, Math.max(0L, duration));
             if (duration <= 0L) continue;
             HealthModels.AppMetadata info = metadata == null ? null : metadata.get(packageName);
@@ -158,40 +182,42 @@ public final class UsageStatsCalculator {
         List<HealthModels.UsageEventRecord> events = sortedEvents(source);
         List<HealthModels.UsageInterval> intervals =
             new ArrayList<HealthModels.UsageInterval>();
-        String activePackage = null;
-        long activeStart = 0L;
+        Map<String, Long> activeStarts = new HashMap<String, Long>();
+        String currentPackage = null;
         for (HealthModels.UsageEventRecord event : events) {
             if (event == null || event.timestampMillis > rangeEndMillis) break;
             if (event.isForeground()) {
                 if (event.packageName.length() == 0) continue;
-                if (activePackage != null && activePackage.equals(event.packageName)) continue;
-                if (activePackage != null) {
-                    addInterval(intervals, activePackage, activeStart,
-                        event.timestampMillis, rangeStartMillis, false);
+                String packageName=event.packageName;
+                if(currentPackage!=null&&!currentPackage.equals(packageName)){
+                    Long start=activeStarts.remove(currentPackage);
+                    if(start!=null)addInterval(intervals,currentPackage,start,event.timestampMillis,
+                        rangeStartMillis, false);
                 }
-                activePackage = event.packageName;
-                activeStart = event.timestampMillis;
+                // Repeated RESUMED/FOREGROUND events for the same package do
+                // not create overlapping sessions.
+                if(!activeStarts.containsKey(packageName))activeStarts.put(packageName,event.timestampMillis);
+                currentPackage=packageName;
             } else if (event.isBackground()) {
-                if (activePackage != null && activePackage.equals(event.packageName)) {
-                    addInterval(intervals, activePackage, activeStart,
-                        event.timestampMillis, rangeStartMillis, false);
-                    activePackage = null;
-                    activeStart = 0L;
+                Long start=activeStarts.remove(event.packageName);
+                if(start!=null)addInterval(intervals,event.packageName,start,event.timestampMillis,
+                    rangeStartMillis, false);
+                if(event.packageName.equals(currentPackage)){
+                    currentPackage=null;
                 }
             } else if (event.isHardBreak()) {
-                if (activePackage != null) {
-                    addInterval(intervals, activePackage, activeStart,
-                        event.timestampMillis, rangeStartMillis, false);
-                    activePackage = null;
-                    activeStart = 0L;
+                for(Map.Entry<String,Long> active:new ArrayList<Map.Entry<String,Long>>(activeStarts.entrySet())){
+                    addInterval(intervals,active.getKey(),active.getValue(),event.timestampMillis,
+                        rangeStartMillis, false);
                 }
+                activeStarts.clear();currentPackage=null;
             }
         }
-        if (activePackage != null) {
-            addInterval(intervals, activePackage, activeStart,
-                rangeEndMillis, rangeStartMillis, true);
+        for(Map.Entry<String,Long> active:activeStarts.entrySet()){
+            addInterval(intervals,active.getKey(),active.getValue(),rangeEndMillis,
+                rangeStartMillis, true);
         }
-        return intervals;
+        return mergeIntervals(intervals);
     }
 
     /**
@@ -358,10 +384,46 @@ public final class UsageStatsCalculator {
 
     private static void addInterval(List<HealthModels.UsageInterval> target, String packageName,
                                     long start, long end, long rangeStart, boolean open) {
-        if (packageName == null || packageName.length() == 0 || end <= start || end <= rangeStart) {
+        if (packageName == null || packageName.length() == 0 || end <= start) {
             return;
         }
-        target.add(new HealthModels.UsageInterval(packageName, start, end, open));
+        long clippedStart=Math.max(rangeStart,start);
+        long clippedEnd=Math.min(end,Long.MAX_VALUE);
+        if(clippedEnd<=clippedStart)return;
+        target.add(new HealthModels.UsageInterval(packageName,clippedStart,clippedEnd,
+            open&&clippedEnd>=end));
+    }
+
+    /** Merge overlapping intervals for one package, then restore time order. */
+    private static List<HealthModels.UsageInterval> mergeIntervals(
+        List<HealthModels.UsageInterval> source) {
+        if(source==null||source.size()<2)return source==null?Collections.emptyList():source;
+        List<HealthModels.UsageInterval> sorted=new ArrayList<HealthModels.UsageInterval>(source);
+        Collections.sort(sorted,new Comparator<HealthModels.UsageInterval>(){
+            @Override public int compare(HealthModels.UsageInterval a,HealthModels.UsageInterval b){
+                int byPackage=a.packageName.compareTo(b.packageName);
+                if(byPackage!=0)return byPackage;
+                int byStart=Long.compare(a.startMillis,b.startMillis);
+                return byStart!=0?byStart:Long.compare(a.endMillis,b.endMillis);
+            }
+        });
+        List<HealthModels.UsageInterval> merged=new ArrayList<HealthModels.UsageInterval>();
+        for(HealthModels.UsageInterval next:sorted){
+            if(merged.isEmpty()){merged.add(next);continue;}
+            HealthModels.UsageInterval current=merged.get(merged.size()-1);
+            if(current.packageName.equals(next.packageName)&&next.startMillis<current.endMillis){
+                merged.set(merged.size()-1,new HealthModels.UsageInterval(current.packageName,
+                    current.startMillis,Math.max(current.endMillis,next.endMillis),
+                    current.openAtRangeEnd||next.openAtRangeEnd));
+            }else merged.add(next);
+        }
+        Collections.sort(merged,new Comparator<HealthModels.UsageInterval>(){
+            @Override public int compare(HealthModels.UsageInterval a,HealthModels.UsageInterval b){
+                int byStart=Long.compare(a.startMillis,b.startMillis);
+                return byStart!=0?byStart:a.packageName.compareTo(b.packageName);
+            }
+        });
+        return merged;
     }
 
     private static boolean hasEventEvidence(List<HealthModels.UsageEventRecord> events,

@@ -41,6 +41,34 @@ public final class HealthUsageTest {
         check(day.totalLaunchCount==3,"foreground sessions must be counted");
         check(calculator.topApps(day,1).get(0).packageName.equals("a"),"ranking must sort by duration");
 
+        // Today's mode must prefer clipped foreground intervals over a stale
+        // UsageStats aggregate, including an interval that started yesterday
+        // and an app that is still open at the query end.
+        List<HealthModels.UsageEventRecord> todayEvents=Arrays.asList(
+            event("a",-5,1),event("a",2,2),
+            event("b",2,1),event("b",5,2),
+            event("c",6,1));
+        List<HealthModels.AppUsageStatRecord> staleStats=Arrays.asList(
+            new HealthModels.AppUsageStatRecord("a",100*MINUTE,100*MINUTE),
+            new HealthModels.AppUsageStatRecord("b",100*MINUTE,100*MINUTE),
+            new HealthModels.AppUsageStatRecord("c",100*MINUTE,100*MINUTE));
+        Map<String,HealthModels.AppMetadata> todayMetadata=new HashMap<>();
+        todayMetadata.put("a",new HealthModels.AppMetadata("a","A",true,true));
+        todayMetadata.put("b",new HealthModels.AppMetadata("b","B",true,true));
+        todayMetadata.put("c",new HealthModels.AppMetadata("c","C",true,true));
+        HealthModels.DayUsage today=calculator.calculateDay(0,10*MINUTE,staleStats,todayEvents,
+            todayMetadata,true,true,true);
+        check(find(today,"a")==2*MINUTE,"today must clip an interval at day start");
+        check(find(today,"b")==3*MINUTE,"today must use event foreground duration");
+        check(find(today,"c")==4*MINUTE,"open foreground must run to now");
+        check(today.totalUsageMillis==9*MINUTE,"today total must not use stale UsageStats");
+
+        List<HealthModels.UsageEventRecord> duplicate=Arrays.asList(
+            event("d",0,1),event("d",0,1),event("d",3,2),event("d",3,2));
+        List<HealthModels.UsageInterval> duplicateIntervals=calculator.buildIntervals(duplicate,0,10*MINUTE);
+        check(duplicateIntervals.size()==1&&duplicateIntervals.get(0).getDurationMillis()==3*MINUTE,
+            "duplicate foreground/background events must not overlap");
+
         List<HealthModels.DayUsage> week=new ArrayList<>();
         for(int i=0;i<7;i++)week.add(dayWithApp(i*1440*MINUTE,"a",i*10*MINUTE));
         HealthModels.AppDetail detail=calculator.createAppDetail("a",week.get(6),week.get(5),week);
@@ -57,7 +85,7 @@ public final class HealthUsageTest {
 
         AppLimit limit=new AppLimit("pkg",30*MINUTE,true,5,false);
         check(limit.withTemporaryUnlock(true).temporaryUnlock,"V2 temporary unlock contract must be preserved");
-        System.out.println("HealthUsageTest: 13 checks passed");
+        System.out.println("HealthUsageTest: 18 checks passed");
     }
 
     private static HealthModels.UsageEventRecord event(String pkg,long minute,int type){
@@ -68,6 +96,11 @@ public final class HealthUsageTest {
         HealthModels.AppUsage app=new HealthModels.AppUsage(pkg,pkg,usage,1,true,true,true,start+usage);
         return new HealthModels.DayUsage(start,start+1440*MINUTE,usage,usage,0,0,0,1,true,true,usage>0,
             usage>0?Collections.singletonList(app):Collections.emptyList());
+    }
+
+    private static long find(HealthModels.DayUsage day,String pkg){
+        for(HealthModels.AppUsage app:day.apps)if(pkg.equals(app.packageName))return app.usageMillis;
+        return 0L;
     }
 
     private static void check(boolean value,String message){if(!value)throw new AssertionError(message);}

@@ -246,8 +246,10 @@ public final class UsageStatsRepository {
             CharSequence label = packageManager.getApplicationLabel(info);
             String appName = label == null ? packageName : label.toString();
             Intent launchIntent = packageManager.getLaunchIntentForPackage(packageName);
-            boolean userFacing = !isCoreSystemPackage(packageName)
-                && (launchIntent != null || (info.flags & ApplicationInfo.FLAG_SYSTEM) == 0);
+            // A package is user-facing only when Android exposes a launcher
+            // entry. This removes background providers/services without a
+            // brittle hard-coded package blacklist.
+            boolean userFacing = !isCoreSystemPackage(packageName) && launchIntent != null;
             return new HealthModels.AppMetadata(packageName, appName, true, userFacing);
         } catch (PackageManager.NameNotFoundException ignored) {
             // A few Android 11+/vendor builds hide otherwise valid packages from

@@ -16,7 +16,9 @@ import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.concurrent.ThreadFactory;
+import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * 健康使用模块的门面：在后台线程读取 UsageStats，组合快照，再切回主线程回调。
@@ -47,6 +49,8 @@ public final class HealthUsageManager {
     private final HealthSettings settings;
     private final ExecutorService executor;
     private final Handler mainHandler;
+    private final AtomicLong generation = new AtomicLong(0L);
+    private volatile Future<?> activeTask;
     private volatile boolean closed;
     private volatile HealthModels.HealthSnapshot cachedSnapshot;
 
@@ -87,17 +91,20 @@ public final class HealthUsageManager {
     public void refresh(final Callback<HealthModels.HealthSnapshot> callback) {
         if (callback == null) throw new IllegalArgumentException("callback == null");
         if (closed) {
-            postError(callback, new IllegalStateException("HealthUsageManager is shut down"));
+            postError(callback, new IllegalStateException("HealthUsageManager is shut down"), generation.get());
             return;
         }
-        executor.execute(new Runnable() {
+        final long requestId = generation.incrementAndGet();
+        Future<?> previous=activeTask;
+        if(previous!=null)previous.cancel(true);
+        activeTask=executor.submit(new Runnable() {
             @Override public void run() {
                 try {
                     HealthModels.HealthSnapshot value = buildSnapshot(System.currentTimeMillis());
                     cachedSnapshot = value;
-                    postSuccess(callback, value);
+                    postSuccess(callback, value, requestId);
                 } catch (Throwable error) {
-                    postError(callback, error);
+                    postError(callback, error, requestId);
                 }
             }
         });
@@ -107,14 +114,17 @@ public final class HealthUsageManager {
                               final Callback<HealthModels.AppDetail> callback) {
         if (callback == null) throw new IllegalArgumentException("callback == null");
         if (packageName == null || packageName.trim().isEmpty()) {
-            postError(callback, new IllegalArgumentException("packageName is empty"));
+            postError(callback, new IllegalArgumentException("packageName is empty"), generation.get());
             return;
         }
         if (closed) {
-            postError(callback, new IllegalStateException("HealthUsageManager is shut down"));
+            postError(callback, new IllegalStateException("HealthUsageManager is shut down"), generation.get());
             return;
         }
-        executor.execute(new Runnable() {
+        final long requestId = generation.incrementAndGet();
+        Future<?> previous=activeTask;
+        if(previous!=null)previous.cancel(true);
+        activeTask=executor.submit(new Runnable() {
             @Override public void run() {
                 try {
                     if (!hasUsageAccess()) throw new PermissionDeniedException();
@@ -127,17 +137,26 @@ public final class HealthUsageManager {
                     }
                     HealthModels.AppDetail detail = calculator.createAppDetail(packageName,
                         snapshot.today, snapshot.yesterday, snapshot.last7Days);
-                    postSuccess(callback, detail);
+                    postSuccess(callback, detail, requestId);
                 } catch (Throwable error) {
-                    postError(callback, error);
+                    postError(callback, error, requestId);
                 }
             }
         });
     }
 
+    /** Ignore and interrupt work that belongs to a detached/hidden page. */
+    public void cancelPending() {
+        generation.incrementAndGet();
+        Future<?> task=activeTask;
+        if(task!=null)task.cancel(true);
+        activeTask=null;
+    }
+
     /** 停止本页面自己的查询线程，不会停止护眼或睡眠 Service。 */
     public void shutdown() {
         closed = true;
+        cancelPending();
         executor.shutdownNow();
         mainHandler.removeCallbacksAndMessages(null);
     }
@@ -184,8 +203,10 @@ public final class HealthUsageManager {
         for (int index = 0; index < dayStarts.size(); index++) {
             long start = dayStarts.get(index);
             long end = index + 1 < dayStarts.size() ? dayStarts.get(index + 1) : nowMillis;
+            boolean preferEvents=index==dayStarts.size()-1;
             days.add(calculator.calculateDay(start, end, statsByDay.get(index),
-                events, metadata, statsAvailabilityByDay.get(index), eventsAvailable));
+                events, metadata, statsAvailabilityByDay.get(index), eventsAvailable,
+                preferEvents));
         }
         if (!hasUsageAccess()) throw new PermissionDeniedException("Usage access was revoked");
 
@@ -245,18 +266,18 @@ public final class HealthUsageManager {
             days.subList(from, to)));
     }
 
-    private <T> void postSuccess(final Callback<T> callback, final T value) {
+    private <T> void postSuccess(final Callback<T> callback, final T value, final long requestId) {
         mainHandler.post(new Runnable() {
             @Override public void run() {
-                if (!closed) callback.onSuccess(value);
+                if (!closed && requestId==generation.get()) callback.onSuccess(value);
             }
         });
     }
 
-    private <T> void postError(final Callback<T> callback, final Throwable error) {
+    private <T> void postError(final Callback<T> callback, final Throwable error, final long requestId) {
         mainHandler.post(new Runnable() {
             @Override public void run() {
-                if (!closed) callback.onError(error);
+                if (!closed && requestId==generation.get()) callback.onError(error);
             }
         });
     }

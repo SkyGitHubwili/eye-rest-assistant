@@ -30,7 +30,9 @@ import android.text.TextWatcher;
 
 import java.util.Locale;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 /** Health usage page. All statistics are supplied by HealthUsageManager off the UI thread. */
 public final class HealthUsageView extends ScrollView {
@@ -44,11 +46,14 @@ public final class HealthUsageView extends ScrollView {
     private HealthModels.HealthSnapshot snapshot;
     private boolean loaded;
     private boolean loading;
-    /** Prevent an async usage refresh from replacing controls below an open dialog. */
-    private boolean dialogOpen;
-    /** Keep the first interactive screen stable while the cold-start query completes. */
-    private boolean initialInteractionGrace;
-    private HealthModels.HealthSnapshot deferredSnapshot;
+    private boolean pageBuilt;
+    private TextView todayTotalView, todayComparisonView;
+    private TextView goalValuesView, goalRemainingView;
+    private ProgressBar goalProgress;
+    private LinearLayout appLimitList, rankingList, signalsContent, scoreContent;
+    private final Map<String, TextView> appLimitUsageViews = new HashMap<String, TextView>();
+    private final Map<String, Long> latestAppUsage = new HashMap<String, Long>();
+    private boolean appLimitUsageReady;
     private float pullStartY=-1f;
 
     public HealthUsageView(Activity activity){
@@ -66,10 +71,20 @@ public final class HealthUsageView extends ScrollView {
             }else if(event.getAction()==MotionEvent.ACTION_CANCEL)pullStartY=-1f;
             return false;
         });
-        showInitial();
+        buildInteractivePage();
     }
 
     public boolean hasLoaded(){return loaded;}
+
+    @Override protected void onAttachedToWindow(){
+        super.onAttachedToWindow();
+        if(!loaded&&!loading)refreshData();
+    }
+
+    @Override protected void onDetachedFromWindow(){
+        manager.cancelPending();
+        super.onDetachedFromWindow();
+    }
 
     public void refreshData(){
         if(loading)return;
@@ -81,27 +96,13 @@ public final class HealthUsageView extends ScrollView {
             loaded=true;snapshot=null;HealthReminderScheduler.cancel(activity);showPermission();return;
         }
         HealthReminderScheduler.schedule(activity);
-        final boolean firstLoad=snapshot==null;
+        if(!pageBuilt)buildInteractivePage();
+        else if(snapshot==null)showLoading();
         loading=true;
-        if(firstLoad){
-            initialInteractionGrace=true;
-            postDelayed(()->{
-                initialInteractionGrace=false;
-                if(!dialogOpen&&deferredSnapshot!=null){
-                    HealthModels.HealthSnapshot pending=deferredSnapshot;
-                    deferredSnapshot=null;
-                    showSnapshot(pending);
-                }
-            },1600L);
-        }
-        // Keep the last completed snapshot visible while the next query runs.
-        // Rebuilding the whole page here caused a visible flash whenever the
-        // user switched between the Sleep and Health tabs.
-        if(snapshot==null) showLoading();
         final Runnable query=()->manager.refresh(new HealthUsageManager.Callback<HealthModels.HealthSnapshot>(){
             @Override public void onSuccess(HealthModels.HealthSnapshot value){
                 loading=false;loaded=true;snapshot=value;
-                if(dialogOpen||initialInteractionGrace) deferredSnapshot=value; else showSnapshot(value);
+                updateSnapshot(value);
             }
             @Override public void onError(Throwable error){
                 loading=false;loaded=true;
@@ -109,31 +110,50 @@ public final class HealthUsageView extends ScrollView {
                 else showError();
             }
         });
-        // Let the recreated screen accept the first tap before the initial
-        // usage query can return and trigger a full-page rebuild.
-        if(firstLoad) postDelayed(query,700L); else query.run();
+        query.run();
     }
 
     public void destroy(){manager.shutdown();}
 
-    private void showInitial(){
-        root.removeAllViews();addHeader(false);
-        TextView prompt=text("进入此页面后会读取手机提供的真实使用数据",14,MUTED,false);
-        prompt.setGravity(Gravity.CENTER);prompt.setPadding(0,dp(70),0,0);root.addView(prompt);
+    /** Build the interactive shell once; later snapshots only update its data views. */
+    private void buildInteractivePage(){
+        root.removeAllViews();
+        addHeader(true);
+
+        LinearLayout today=card();today.setBackground(round(Color.rgb(233,243,236),22));
+        TextView caption=text("今日手机使用",14,MUTED,false);caption.setGravity(Gravity.CENTER);today.addView(caption);
+        todayTotalView=text("正在读取",42,INK,true);todayTotalView.setGravity(Gravity.CENTER);todayTotalView.setPadding(0,dp(5),0,dp(5));today.addView(todayTotalView);
+        todayComparisonView=text("正在整理使用数据",13,MUTED,false);todayComparisonView.setGravity(Gravity.CENTER);today.addView(todayComparisonView);addCard(today);
+
+        addGoalCard();
+        addAppLimitCard(false);
+        buildRankingCard();
+        buildUsageSignalsCard();
+        buildScoreCard();
+
+        Button all=button("查看全部数据",Color.rgb(229,241,232),GREEN);
+        all.setOnClickListener(v->activity.startActivity(new Intent(activity,HealthDataActivity.class)));
+        LinearLayout.LayoutParams allParams=new LinearLayout.LayoutParams(-1,dp(50));allParams.setMargins(0,dp(20),0,0);root.addView(all,allParams);
+        TextView disclaimer=text("健康指数仅用于帮助理解使用习惯，不代表医疗诊断。",11,Color.rgb(137,148,142),false);
+        disclaimer.setGravity(Gravity.CENTER);disclaimer.setPadding(0,dp(12),0,0);root.addView(disclaimer);
+        pageBuilt=true;
     }
 
     private void showLoading(){
-        root.removeAllViews();addHeader(false);
-        ProgressBar progress=new ProgressBar(activity);root.addView(progress,new LinearLayout.LayoutParams(-1,dp(52)));
-        TextView label=text("正在整理使用数据…",14,MUTED,false);label.setGravity(Gravity.CENTER);root.addView(label);
-        // Keep existing app-limit controls available during the first load
-        // after the process is recreated.
-        addGoalCard(null);
-        addAppLimitCard(false);
+        if(!pageBuilt)buildInteractivePage();
+        todayTotalView.setText("正在读取");
+        todayComparisonView.setText("正在整理使用数据");
+        updateGoal(0L);
+        appLimitUsageReady=false;
+        updateAppLimitUsage(false);
+        updateRanking(null);
+        updateUsageSignals(null);
+        updateScore(null);
     }
 
     private void showPermission(){
         root.removeAllViews();addHeader(false);
+        pageBuilt=false;
         LinearLayout panel=card();
         panel.addView(text("开启使用情况访问权限",20,INK,true));
         TextView message=text("健康使用需要读取手机的应用使用时间，才能统计今日使用情况和 App 排行。",14,MUTED,false);
@@ -153,40 +173,30 @@ public final class HealthUsageView extends ScrollView {
 
     private void showError(){
         root.removeAllViews();addHeader(false);
+        pageBuilt=false;
         LinearLayout panel=card();panel.addView(text("暂时无法读取使用数据",18,INK,true));
         TextView note=text("系统统计服务暂时不可用，请稍后重试。",14,MUTED,false);note.setPadding(0,dp(8),0,dp(14));panel.addView(note);
         Button retry=button("重新加载",GREEN,Color.WHITE);retry.setOnClickListener(v->refreshData());panel.addView(retry,new LinearLayout.LayoutParams(-1,dp(48)));
         addCard(panel);
     }
 
-    private void showSnapshot(HealthModels.HealthSnapshot value){
-        root.removeAllViews();addHeader(true);
-        if(value==null||!value.hasData){
-            LinearLayout empty=card();empty.addView(text("暂无使用数据",20,INK,true));
-            TextView hint=text("系统尚未返回今天的应用使用记录。你可以稍后手动刷新。",14,MUTED,false);
-            hint.setPadding(0,dp(10),0,dp(16));empty.addView(hint);
-            Button retry=button("刷新数据",GREEN,Color.WHITE);retry.setOnClickListener(v->refreshData());empty.addView(retry,new LinearLayout.LayoutParams(-1,dp(48)));
-            addCard(empty);addGoalCard(value);addAppLimitCard(true);return;
-        }
-
-        LinearLayout today=card();today.setBackground(round(Color.rgb(233,243,236),22));
-        TextView caption=text("今日手机使用",14,MUTED,false);caption.setGravity(Gravity.CENTER);today.addView(caption);
-        TextView total=text(duration(value.today.totalUsageMillis),42,INK,true);total.setGravity(Gravity.CENTER);total.setPadding(0,dp(5),0,dp(5));today.addView(total);
-        TextView comparison=text(comparison(value.today.totalUsageMillis,value.yesterday.totalUsageMillis),13,
-            value.today.totalUsageMillis<=value.yesterday.totalUsageMillis?GREEN:Color.rgb(184,74,53),false);
-        comparison.setGravity(Gravity.CENTER);today.addView(comparison);addCard(today);
-
-        addGoalCard(value);
-        addAppLimitCard(true);
-        addRanking(value);
-        addUsageSignals(value);
-        addScore(value.healthScore);
-
-        Button all=button("查看全部数据",Color.rgb(229,241,232),GREEN);
-        all.setOnClickListener(v->activity.startActivity(new Intent(activity,HealthDataActivity.class)));
-        LinearLayout.LayoutParams allParams=new LinearLayout.LayoutParams(-1,dp(50));allParams.setMargins(0,dp(20),0,0);root.addView(all,allParams);
-        TextView disclaimer=text("健康指数仅用于帮助理解使用习惯，不代表医疗诊断。",11,Color.rgb(137,148,142),false);
-        disclaimer.setGravity(Gravity.CENTER);disclaimer.setPadding(0,dp(12),0,0);root.addView(disclaimer);
+    private void updateSnapshot(HealthModels.HealthSnapshot value){
+        if(!pageBuilt)buildInteractivePage();
+        if(value==null||value.today==null){showLoading();return;}
+        long used=value.today.totalUsageMillis;
+        todayTotalView.setText(value.hasData?duration(used):"0分钟");
+        if(value.yesterday!=null){
+            todayComparisonView.setText(comparison(used,value.yesterday.totalUsageMillis));
+            todayComparisonView.setTextColor(used<=value.yesterday.totalUsageMillis?GREEN:Color.rgb(184,74,53));
+        }else todayComparisonView.setText("昨日暂无可比较数据");
+        updateGoal(used);
+        latestAppUsage.clear();
+        if(value.today.apps!=null)for(HealthModels.AppUsage app:value.today.apps)
+            if(app!=null)latestAppUsage.put(app.packageName,app.usageMillis);
+        appLimitUsageReady=true;updateAppLimitUsage(true);
+        updateRanking(value);
+        updateUsageSignals(value);
+        updateScore(value.healthScore);
     }
 
     private void addHeader(boolean canRefresh){
@@ -202,31 +212,44 @@ public final class HealthUsageView extends ScrollView {
         root.addView(header);
     }
 
-    private void addGoalCard(HealthModels.HealthSnapshot value){
+    private void addGoalCard(){
         int goalMinutes=manager.getSettings().getDailyGoalMinutes();
         long goalMillis=goalMinutes*60000L;
-        long used=value==null||value.today==null?0:value.today.totalUsageMillis;
         LinearLayout panel=card();
         LinearLayout heading=row();heading.addView(text("每日目标",18,INK,true),new LinearLayout.LayoutParams(0,-2,1));
         Button edit=button("修改",Color.TRANSPARENT,GREEN);edit.setTextSize(12);heading.addView(edit,new LinearLayout.LayoutParams(dp(64),dp(40)));panel.addView(heading);
-        TextView values=text(duration(used)+" / "+duration(goalMillis),16,INK,true);values.setPadding(0,dp(12),0,dp(8));panel.addView(values);
-        ProgressBar progress=new ProgressBar(activity,null,android.R.attr.progressBarStyleHorizontal);progress.setMax(1000);
-        progress.setProgress(goalMillis<=0?0:(int)Math.min(1000,used*1000L/goalMillis));progress.setProgressTintList(android.content.res.ColorStateList.valueOf(GREEN));
-        panel.addView(progress,new LinearLayout.LayoutParams(-1,dp(12)));
-        String remaining=used<=goalMillis?"还剩 "+duration(goalMillis-used):"已超过目标 "+duration(used-goalMillis);
-        TextView remainingView=text(remaining,13,used<=goalMillis?MUTED:Color.rgb(184,74,53),false);remainingView.setPadding(0,dp(9),0,0);panel.addView(remainingView);
+        goalValuesView=text("0分钟 / "+duration(goalMillis),16,INK,true);goalValuesView.setPadding(0,dp(12),0,dp(8));panel.addView(goalValuesView);
+        goalProgress=new ProgressBar(activity,null,android.R.attr.progressBarStyleHorizontal);goalProgress.setMax(1000);
+        goalProgress.setProgressTintList(android.content.res.ColorStateList.valueOf(GREEN));panel.addView(goalProgress,new LinearLayout.LayoutParams(-1,dp(12)));
+        goalRemainingView=text("还剩 "+duration(goalMillis),13,MUTED,false);goalRemainingView.setPadding(0,dp(9),0,0);panel.addView(goalRemainingView);
         View.OnClickListener openGoal=v->showGoalDialog();
         edit.setOnClickListener(openGoal);
         // The whole heading is an intentionally forgiving touch target on the
         // first frame after a cold start, while the visible button remains.
         heading.setOnClickListener(openGoal);
         addCard(panel);
+        updateGoal(0L);
     }
 
-    private void addRanking(HealthModels.HealthSnapshot value){
+    private void updateGoal(long used){
+        if(goalValuesView==null)return;
+        long goalMillis=manager.getSettings().getDailyGoalMinutes()*60000L;
+        goalValuesView.setText(duration(used)+" / "+duration(goalMillis));
+        goalProgress.setProgress(goalMillis<=0?0:(int)Math.min(1000,used*1000L/goalMillis));
+        boolean within=used<=goalMillis;
+        goalRemainingView.setText(within?"还剩 "+duration(goalMillis-used):"已超过目标 "+duration(used-goalMillis));
+        goalRemainingView.setTextColor(within?MUTED:Color.rgb(184,74,53));
+    }
+
+    private void buildRankingCard(){
         LinearLayout panel=card();panel.addView(text("今日使用排行",18,INK,true));
-        if(value.topApps==null||value.topApps.isEmpty()){
-            TextView empty=text("暂无可排行的应用数据",14,MUTED,false);empty.setPadding(0,dp(12),0,0);panel.addView(empty);addCard(panel);return;
+        rankingList=column();panel.addView(rankingList);addCard(panel);updateRanking(null);
+    }
+
+    private void updateRanking(HealthModels.HealthSnapshot value){
+        if(rankingList==null)return;rankingList.removeAllViews();
+        if(value==null||value.topApps==null||value.topApps.isEmpty()){
+            TextView empty=text(value==null?"正在读取使用数据":"暂无可排行的应用数据",14,MUTED,false);empty.setPadding(0,dp(12),0,0);rankingList.addView(empty);return;
         }
         long max=Math.max(1,value.topApps.get(0).usageMillis);
         int count=Math.min(5,value.topApps.size());
@@ -244,25 +267,30 @@ public final class HealthUsageView extends ScrollView {
             item.addView(details,new LinearLayout.LayoutParams(0,-2,1));
             item.setBackground(round(Color.TRANSPARENT,12));item.setClickable(true);item.setFocusable(true);
             item.setOnClickListener(v->{Intent intent=new Intent(activity,AppDetailActivity.class).putExtra(AppDetailActivity.EXTRA_PACKAGE_NAME,app.packageName);activity.startActivity(intent);});
-            panel.addView(item);
+            rankingList.addView(item);
         }
-        addCard(panel);
     }
 
-    private void addUsageSignals(HealthModels.HealthSnapshot value){
+    private void buildUsageSignalsCard(){
         LinearLayout panel=card();
         LinearLayout heading=row();heading.addView(text("使用节奏",18,INK,true));panel.addView(heading);
+        signalsContent=column();panel.addView(signalsContent);addCard(panel);updateUsageSignals(null);
+    }
+
+    private void updateUsageSignals(HealthModels.HealthSnapshot value){
+        if(signalsContent==null)return;signalsContent.removeAllViews();
+        if(value==null||value.today==null){signalsContent.addView(text("正在读取使用节奏",13,MUTED,false));return;}
         int threshold=manager.getSettings().getContinuousReminderMinutes();
         long longest=value.today.longestContinuousMillis;
-        TextView longestTitle=text("最长连续使用",12,MUTED,false);longestTitle.setPadding(0,dp(14),0,0);panel.addView(longestTitle);
-        panel.addView(text(value.today.continuousUsageAvailable?duration(longest):"数据不可用",25,INK,true));
+        TextView longestTitle=text("最长连续使用",12,MUTED,false);longestTitle.setPadding(0,dp(14),0,0);
+        signalsContent.addView(longestTitle);
+        signalsContent.addView(text(value.today.continuousUsageAvailable?duration(longest):"数据不可用",25,INK,true));
         String warning=!value.today.continuousUsageAvailable?"当前系统未提供可靠的连续使用事件":threshold==0?"连续使用提醒已关闭":longest>=threshold*60000L?"连续使用已超过 "+threshold+" 分钟":"提醒阈值 "+threshold+" 分钟";
-        TextView warningView=text(warning,13,longest>=threshold*60000L&&threshold>0?Color.rgb(184,74,53):MUTED,false);warningView.setPadding(0,dp(5),0,0);panel.addView(warningView);
-        View divider=new View(activity);divider.setBackgroundColor(Color.rgb(230,235,231));LinearLayout.LayoutParams dividerParams=new LinearLayout.LayoutParams(-1,dp(1));dividerParams.setMargins(0,dp(14),0,dp(12));panel.addView(divider,dividerParams);
+        TextView warningView=text(warning,13,longest>=threshold*60000L&&threshold>0?Color.rgb(184,74,53):MUTED,false);warningView.setPadding(0,dp(5),0,0);signalsContent.addView(warningView);
+        View divider=new View(activity);divider.setBackgroundColor(Color.rgb(230,235,231));LinearLayout.LayoutParams dividerParams=new LinearLayout.LayoutParams(-1,dp(1));dividerParams.setMargins(0,dp(14),0,dp(12));signalsContent.addView(divider,dividerParams);
         String launches=value.today.launchCountsAvailable?String.valueOf(value.today.totalLaunchCount):"数据不可用";
-        panel.addView(metricRow("今日 App 打开次数",launches));
-        if(value.today.continuousUsageAvailable&&value.today.currentContinuousMillis>0)panel.addView(metricRow("当前连续使用",duration(value.today.currentContinuousMillis)));
-        addCard(panel);
+        signalsContent.addView(metricRow("今日 App 打开次数",launches));
+        if(value.today.continuousUsageAvailable&&value.today.currentContinuousMillis>0)signalsContent.addView(metricRow("当前连续使用",duration(value.today.currentContinuousMillis)));
     }
 
     private void addAppLimitCard(boolean usageReady){
@@ -271,24 +299,47 @@ public final class HealthUsageView extends ScrollView {
         heading.addView(text("应用使用限制",18,INK,true),new LinearLayout.LayoutParams(0,-2,1));
         Button add=button("添加应用",Color.TRANSPARENT,GREEN); add.setTextSize(12); heading.addView(add,new LinearLayout.LayoutParams(dp(92),dp(40))); panel.addView(heading);
         TextView hint=text("选择某个 App 并设置每日可使用时长，达到上限后会显示限制画面。",13,MUTED,false); hint.setPadding(0,dp(7),0,dp(8)); panel.addView(hint);
+        appLimitList=column();panel.addView(appLimitList);
+        appLimitUsageReady=usageReady;
+        renderAppLimitRows(usageReady);
+        addCard(panel);
+    }
+
+    private void renderAppLimitRows(boolean usageReady){
+        if(appLimitList==null)return;
+        appLimitList.removeAllViews();appLimitUsageViews.clear();
         List<AppLimit> limits=AppLimitStore.get(activity);
         if(limits.isEmpty()){
-            TextView empty=text("暂未设置应用限制",13,MUTED,false); empty.setPadding(0,dp(8),0,dp(4)); panel.addView(empty);
-        } else for(AppLimit limit:limits){
+            TextView empty=text("暂未设置应用限制",13,MUTED,false); empty.setPadding(0,dp(8),0,dp(4)); appLimitList.addView(empty);return;
+        }
+        for(AppLimit limit:limits){
             LinearLayout item=row(); item.setPadding(0,dp(8),0,dp(4));
             ImageView icon=new ImageView(activity); Drawable limitIcon=manager.loadAppIcon(limit.packageName);
             icon.setImageDrawable(limitIcon!=null?limitIcon:activity.getDrawable(android.R.drawable.sym_def_app_icon));
             item.addView(icon,new LinearLayout.LayoutParams(dp(38),dp(38)));
             LinearLayout labels=column(); labels.setPadding(dp(10),0,dp(8),0);
             labels.addView(text(appLabel(limit.packageName),15,INK,true));
-            labels.addView(text(usageReady?"今日已用 "+duration(usageToday(limit.packageName))+" / 上限 "+duration(limit.dailyLimitMillis):"正在读取今日使用 / 上限 "+duration(limit.dailyLimitMillis),12,MUTED,false));
+            TextView usage=text(usageReady?"今日已用 "+duration(usageToday(limit.packageName))+" / 上限 "+duration(limit.dailyLimitMillis):"正在读取今日使用 / 上限 "+duration(limit.dailyLimitMillis),12,MUTED,false);
+            labels.addView(usage);appLimitUsageViews.put(limit.packageName,usage);
             item.addView(labels,new LinearLayout.LayoutParams(0,-2,1));
             Button remove=button("移除",Color.TRANSPARENT,Color.rgb(184,74,53)); remove.setTextSize(12); LinearLayout.LayoutParams rp=new LinearLayout.LayoutParams(dp(56),dp(38)); rp.setMargins(dp(6),0,0,0); item.addView(remove,rp);
             item.setOnClickListener(v->showAppLimitDialogV2(limit));
-            remove.setOnClickListener(v->{AppLimitStore.remove(activity,limit.packageName); if(AppLimitStore.hasEnabled(activity))AppLimitService.start(activity);else AppLimitService.stop(activity); if(snapshot!=null)showSnapshot(snapshot);});
-            panel.addView(item);
+            remove.setOnClickListener(v->{AppLimitStore.remove(activity,limit.packageName); if(AppLimitStore.hasEnabled(activity))AppLimitService.start(activity);else AppLimitService.stop(activity); renderAppLimitRows(appLimitUsageReady);});
+            appLimitList.addView(item);
         }
-        add.setOnClickListener(v->showAppLimitDialogV2(null)); addCard(panel);
+    }
+
+    private void updateAppLimitUsage(boolean ready){
+        if(appLimitList==null)return;
+        appLimitUsageReady=ready;
+        Map<String,AppLimit> limits=new HashMap<String,AppLimit>();
+        for(AppLimit limit:AppLimitStore.get(activity))limits.put(limit.packageName,limit);
+        for(Map.Entry<String,TextView> entry:appLimitUsageViews.entrySet()){
+            AppLimit limit=limits.get(entry.getKey());if(limit==null)continue;
+            long used=latestAppUsage.containsKey(limit.packageName)
+                ?latestAppUsage.get(limit.packageName):usageToday(limit.packageName);
+            entry.getValue().setText(ready?"今日已用 "+duration(used)+" / 上限 "+duration(limit.dailyLimitMillis):"正在读取今日使用 / 上限 "+duration(limit.dailyLimitMillis));
+        }
     }
 
     private String appLabel(String pkg){
@@ -335,16 +386,13 @@ public final class HealthUsageView extends ScrollView {
             if(shown==0){TextView empty=text("没有匹配的应用",13,MUTED,false);empty.setGravity(Gravity.CENTER);appList.addView(empty,new LinearLayout.LayoutParams(-1,dp(48)));}
         };
         render[0].run(); search.addTextChangedListener(new TextWatcher(){public void beforeTextChanged(CharSequence s,int st,int c,int a){} public void onTextChanged(CharSequence s,int st,int b,int c){render[0].run();} public void afterTextChanged(Editable e){}});
-        dialogOpen=true;
         AlertDialog dialog=new AlertDialog.Builder(activity).setTitle(editing==null?"设置应用使用限制":"修改应用使用限制").setView(form).setNegativeButton("取消",null).setPositiveButton("保存",(d,w)->{
             int total=hours.getValue()*60+mins.getValue(); if(total<1){Toast.makeText(activity,"时长至少 1 分钟",Toast.LENGTH_SHORT).show();return;}
             String pkg=choices.get(selected[0]).activityInfo.packageName;
             AppLimitStore.upsert(activity,new AppLimit(pkg,total*60000L,true,0,true)); AppLimitService.start(activity);
         }).create();
         dialog.setOnDismissListener(v->{
-            dialogOpen=false;
-            HealthModels.HealthSnapshot pending=deferredSnapshot; deferredSnapshot=null;
-            if(pending!=null) showSnapshot(pending); else if(snapshot!=null) showSnapshot(snapshot);
+            if(snapshot!=null) updateSnapshot(snapshot);
         });
         dialog.show();
     }
@@ -363,19 +411,25 @@ public final class HealthUsageView extends ScrollView {
         new AlertDialog.Builder(activity).setTitle("设置应用使用限制").setView(form).setNegativeButton("取消",null).setPositiveButton("保存",(d,w)->{
             int total=hours.getValue()*60+mins.getValue(); if(total<1){Toast.makeText(activity,"时长至少 1 分钟",Toast.LENGTH_SHORT).show();return;}
             String pkg=choices.get(appSpinner.getSelectedItemPosition()).activityInfo.packageName;
-            AppLimitStore.upsert(activity,new AppLimit(pkg,total*60000L,true,0,true)); AppLimitService.start(activity); if(snapshot!=null)showSnapshot(snapshot);
+            AppLimitStore.upsert(activity,new AppLimit(pkg,total*60000L,true,0,true)); AppLimitService.start(activity);
+            renderAppLimitRows(appLimitUsageReady);
         }).show();
     }
 
-    private void addScore(HealthModels.HealthScore score){
-        if(score==null)return;
+    private void buildScoreCard(){
         LinearLayout panel=card();panel.setBackground(round(Color.rgb(240,245,242),22));
         panel.addView(text("今日健康指数",18,INK,true));
+        scoreContent=column();panel.addView(scoreContent);addCard(panel);updateScore(null);
+    }
+
+    private void updateScore(HealthModels.HealthScore score){
+        if(scoreContent==null)return;scoreContent.removeAllViews();
+        if(score==null){scoreContent.addView(text("正在计算",13,MUTED,false));return;}
         LinearLayout scoreLine=row();scoreLine.setPadding(0,dp(10),0,0);scoreLine.addView(text(String.valueOf(score.score),38,GREEN,true));
-        TextView label=text(score.label,15,INK,true);label.setPadding(dp(12),0,0,0);scoreLine.addView(label);panel.addView(scoreLine);
-        TextView explanation=text(score.explanation,13,MUTED,false);explanation.setLineSpacing(dp(3),1f);explanation.setPadding(0,dp(8),0,0);panel.addView(explanation);
+        TextView label=text(score.label,15,INK,true);label.setPadding(dp(12),0,0,0);scoreLine.addView(label);scoreContent.addView(scoreLine);
+        TextView explanation=text(score.explanation,13,MUTED,false);explanation.setLineSpacing(dp(3),1f);explanation.setPadding(0,dp(8),0,0);scoreContent.addView(explanation);
         TextView formula=text("本地透明计算：目标 -"+score.goalPenalty+" · 连续使用 -"+score.continuousPenalty+" · 夜间使用 -"+score.nightPenalty,11,Color.rgb(137,148,142),false);
-        formula.setPadding(0,dp(9),0,0);panel.addView(formula);addCard(panel);
+        formula.setPadding(0,dp(9),0,0);scoreContent.addView(formula);
     }
 
     private LinearLayout metricRow(String label,String value){
@@ -388,13 +442,10 @@ public final class HealthUsageView extends ScrollView {
         NumberPicker hours=new NumberPicker(activity);hours.setMinValue(0);hours.setMaxValue(23);hours.setValue(current/60);
         NumberPicker minutes=new NumberPicker(activity);minutes.setMinValue(0);minutes.setMaxValue(11);String[] labels=new String[12];for(int i=0;i<12;i++)labels[i]=String.format(Locale.CHINA,"%02d 分",i*5);minutes.setDisplayedValues(labels);minutes.setValue((current%60)/5);
         pickers.addView(hours,new LinearLayout.LayoutParams(0,dp(150),1));pickers.addView(minutes,new LinearLayout.LayoutParams(0,dp(150),1));
-        dialogOpen=true;
         AlertDialog dialog=new AlertDialog.Builder(activity).setTitle("每日手机使用目标").setView(pickers).setNegativeButton("取消",null)
-            .setPositiveButton("保存",(d,w)->{int value=hours.getValue()*60+minutes.getValue()*5;if(value<30){Toast.makeText(activity,"目标至少设置为 30 分钟",Toast.LENGTH_SHORT).show();return;}manager.getSettings().setDailyGoalMinutes(value);if(snapshot!=null)showSnapshot(snapshot);}).create();
+            .setPositiveButton("保存",(d,w)->{int value=hours.getValue()*60+minutes.getValue()*5;if(value<30){Toast.makeText(activity,"目标至少设置为 30 分钟",Toast.LENGTH_SHORT).show();return;}manager.getSettings().setDailyGoalMinutes(value);updateGoal(snapshot==null||snapshot.today==null?0L:snapshot.today.totalUsageMillis);}).create();
         dialog.setOnDismissListener(v->{
-            dialogOpen=false;
-            HealthModels.HealthSnapshot pending=deferredSnapshot; deferredSnapshot=null;
-            if(pending!=null) showSnapshot(pending); else if(snapshot!=null) showSnapshot(snapshot);
+            if(snapshot!=null) updateSnapshot(snapshot);
         });
         dialog.show();
     }
@@ -407,7 +458,7 @@ public final class HealthUsageView extends ScrollView {
             .setNegativeButton("取消",null).setPositiveButton("保存",(d,w)->{
                 manager.getSettings().setContinuousReminderMinutes(values[selected[0]]);
                 HealthReminderScheduler.reschedule(activity);
-                if(snapshot!=null)showSnapshot(snapshot);
+                if(snapshot!=null)updateSnapshot(snapshot);
             }).show();
     }
 
