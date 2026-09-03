@@ -167,7 +167,10 @@ public final class SleepController {
             File imageFile=new File(context.getFilesDir(),"sleep_warning_image");
             if(imageFile.exists()){
                 ImageView image=new ImageView(context);image.setScaleType(ImageView.ScaleType.CENTER_CROP);
-                image.setImageBitmap(BitmapFactory.decodeFile(imageFile.getAbsolutePath()));
+                // The warning overlay may be created during app cold-start.
+                // Avoid decoding a full-resolution camera image on the main
+                // service thread; the preview only needs a 240dp-wide bitmap.
+                image.setImageBitmap(decodePreview(imageFile,dp(480),dp(440)));
                 image.setAlpha(Math.max(0f,Math.min(1f,prefs.getInt("sleep_warning_alpha",85)/100f)));
                 root.addView(image,new FrameLayout.LayoutParams(-1,dp(220)));
                 View tint=new View(context);tint.setBackgroundColor(Color.argb(opacity*120/100,30,8,18));
@@ -241,6 +244,16 @@ public final class SleepController {
     private TextView label(String value,int sp,int color,boolean bold){
         TextView view=new TextView(context);view.setText(value);view.setTextSize(sp);view.setTextColor(color);
         if(bold)view.setTypeface(Typeface.DEFAULT,Typeface.BOLD);return view;
+    }
+    private android.graphics.Bitmap decodePreview(File file,int reqWidth,int reqHeight){
+        BitmapFactory.Options bounds=new BitmapFactory.Options();
+        bounds.inJustDecodeBounds=true;
+        BitmapFactory.decodeFile(file.getAbsolutePath(),bounds);
+        int sample=1;
+        while(bounds.outWidth/sample>reqWidth*2||bounds.outHeight/sample>reqHeight*2)sample*=2;
+        BitmapFactory.Options options=new BitmapFactory.Options();
+        options.inSampleSize=sample;
+        return BitmapFactory.decodeFile(file.getAbsolutePath(),options);
     }
     private int dp(int value){return Math.round(value*context.getResources().getDisplayMetrics().density);}
 }

@@ -361,7 +361,10 @@ public class MainActivity extends Activity {
         sleepPreviewFrame.setBackground(round(Color.rgb(238,242,238),16));sleepPreviewFrame.setClipToOutline(true);
         ImageView sleepPreview=new ImageView(this);sleepPreview.setScaleType(ImageView.ScaleType.CENTER_CROP);
         File sleepCustom=new File(getFilesDir(),"sleep_warning_image");
-        if(sleepCustom.exists())sleepPreview.setImageBitmap(BitmapFactory.decodeFile(sleepCustom.getAbsolutePath()));
+        // Never decode the original user image at full resolution during
+        // cold-start. A camera/anime image can be many megapixels and would
+        // block the main thread before the Health page receives its first tap.
+        if(sleepCustom.exists())sleepPreview.setImageBitmap(decodePreview(sleepCustom,dp(720),dp(300)));
         else sleepPreview.setBackground(new GradientDrawable(GradientDrawable.Orientation.TL_BR,new int[]{Color.rgb(72,7,13),Color.rgb(137,35,52)}));
         sleepPreviewFrame.addView(sleepPreview,new FrameLayout.LayoutParams(-1,-1));
         TextView sleepPreviewTitle=text("即将进入睡眠 · 倒计时",18,Color.WHITE,true);sleepPreviewTitle.setGravity(Gravity.CENTER);

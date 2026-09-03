@@ -196,7 +196,7 @@ public class EyeRestService extends Service {
         root.setOnSystemUiVisibilityChangeListener(visibility->root.setSystemUiVisibility(immersiveFlags));
         File custom=new File(getFilesDir(),"break_image");
         if(custom.exists()){
-            ImageView image=new ImageView(this);image.setScaleType(ImageView.ScaleType.CENTER_CROP);image.setImageBitmap(BitmapFactory.decodeFile(custom.getAbsolutePath()));
+            ImageView image=new ImageView(this);image.setScaleType(ImageView.ScaleType.CENTER_CROP);image.setImageBitmap(decodePreview(custom,1080,1920));
             root.addView(image,new FrameLayout.LayoutParams(-1,-1));
         }else root.setBackground(new GradientDrawable(GradientDrawable.Orientation.TL_BR,new int[]{Color.rgb(18,59,53),Color.rgb(79,137,105),Color.rgb(203,174,116)}));
         View tint=new View(this);tint.setBackgroundColor(Color.argb(55,8,24,20));root.addView(tint,new FrameLayout.LayoutParams(-1,-1));
@@ -298,6 +298,13 @@ public class EyeRestService extends Service {
     }
     private void updateNotification(String text){getSystemService(NotificationManager.class).notify(20,notification(text));}
     private int dp(int n){return Math.round(n*getResources().getDisplayMetrics().density);}
+    private android.graphics.Bitmap decodePreview(File file,int reqWidth,int reqHeight){
+        BitmapFactory.Options bounds=new BitmapFactory.Options();bounds.inJustDecodeBounds=true;
+        BitmapFactory.decodeFile(file.getAbsolutePath(),bounds);int sample=1;
+        while(bounds.outWidth/sample>reqWidth*2||bounds.outHeight/sample>reqHeight*2)sample*=2;
+        BitmapFactory.Options options=new BitmapFactory.Options();options.inSampleSize=sample;
+        return BitmapFactory.decodeFile(file.getAbsolutePath(),options);
+    }
     @Override public void onTaskRemoved(Intent rootIntent){
         if(prefs.getBoolean("keep_running_closed",false)&&isEnabledToday()&&prefs.getBoolean("mode_started",false)){
             updateNotification(initialTimerText(ACTION_REEVALUATE));

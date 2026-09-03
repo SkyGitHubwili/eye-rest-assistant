@@ -63,7 +63,6 @@ public final class AppLimitService extends Service {
         if (!AppLimitStore.hasEnabled(this)) { removeOverlay(); stopSelf(); return; }
         if (!Settings.canDrawOverlays(this)) return;
         String foreground = currentForegroundPackage();
-        Log.d(TAG, "foreground=" + foreground);
         // Showing our overlay can produce a newer UsageEvents record for this
         // package. Keep the block attached to the limited app until a real
         // different foreground package is observed.
@@ -78,7 +77,6 @@ public final class AppLimitService extends Service {
         for (AppLimit limit : AppLimitStore.get(this)) if (limit.enabled && limit.packageName.equals(foreground)) { matched = limit; break; }
         if (matched == null) { removeOverlay(); return; }
         long used = usageToday(matched.packageName);
-        Log.d(TAG, "matched=" + matched.packageName + " used=" + used + " limit=" + matched.dailyLimitMillis);
         if (used >= matched.dailyLimitMillis) showOverlay(matched.packageName, matched.dailyLimitMillis);
         else removeOverlay();
     }

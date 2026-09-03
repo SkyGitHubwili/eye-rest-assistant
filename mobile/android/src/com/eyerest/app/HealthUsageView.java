@@ -2,8 +2,6 @@ package com.eyerest.app;
 
 import android.app.Activity;
 import android.app.AlertDialog;
-import android.app.usage.UsageStats;
-import android.app.usage.UsageStatsManager;
 import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.content.pm.ResolveInfo;
@@ -51,6 +49,7 @@ public final class HealthUsageView extends ScrollView {
     private boolean pageBuilt;
     private boolean firstFrameReady;
     private boolean refreshQueued;
+    private boolean destroyed;
     private TextView todayTotalView, todayComparisonView;
     private TextView goalValuesView, goalRemainingView;
     private ProgressBar goalProgress;
@@ -58,11 +57,15 @@ public final class HealthUsageView extends ScrollView {
     private final Map<String, TextView> appLimitUsageViews = new HashMap<String, TextView>();
     private final Map<String, Long> latestAppUsage = new HashMap<String, Long>();
     private final Map<String, Drawable> appIconCache = new HashMap<String, Drawable>();
+    private final Map<String, String> appLabelCache = new HashMap<String, String>();
     private final ExecutorService iconExecutor = Executors.newFixedThreadPool(2);
+    /** PackageManager can block on Xiaomi's package service; never query it from a tap. */
+    private final ExecutorService packageExecutor = Executors.newSingleThreadExecutor();
     private boolean appLimitUsageReady;
     private float pullStartY=-1f;
     private final Runnable firstFrameGate = () -> {
-        if (!isAttachedToWindow()) return;
+        if (!isAttachedToWindow() || getVisibility() != View.VISIBLE) return;
+        if (!firstFrameReady) scrollTo(0,0);
         firstFrameReady = true;
         if (refreshQueued) {
             refreshQueued = false;
@@ -92,45 +95,71 @@ public final class HealthUsageView extends ScrollView {
 
     @Override protected void onAttachedToWindow(){
         super.onAttachedToWindow();
+        destroyed=false;
         if (!firstFrameReady) {
             refreshQueued = true;
-            // Let Android draw the interactive shell before UsageStats work
-            // and icon callbacks can compete with the first user tap.
-            postDelayed(firstFrameGate, 180L);
+            // Start after the first traversal, without adding a human-visible
+            // 180 ms dead period. All UsageStats/PackageManager work below is
+            // asynchronous, so the shell remains tappable immediately.
+            postOnAnimation(firstFrameGate);
         } else if(!loaded&&!loading) refreshData();
     }
 
     @Override protected void onDetachedFromWindow(){
+        destroyed=true;
         removeCallbacks(firstFrameGate);
         manager.cancelPending();
+        // A cancelled manager request will not deliver a callback. Reset the
+        // local gate so returning to this page can always issue a new query.
+        loading=false;
+        refreshQueued=true;
         super.onDetachedFromWindow();
     }
 
     public void refreshData(){
+        if(!isAttachedToWindow() || getVisibility()!=View.VISIBLE){
+            refreshQueued=true;
+            return;
+        }
         if (!firstFrameReady) {
             refreshQueued = true;
+            removeCallbacks(firstFrameGate);
+            postOnAnimation(firstFrameGate);
             return;
         }
         if(loading)return;
         if(AppLimitStore.hasEnabled(activity)) AppLimitService.start(activity);
-        // The user may have just toggled Usage Access in Settings. Do not let
-        // a short-lived cached AppOps result keep the permission card visible.
+        // The user may have just toggled Usage Access in Settings. The actual
+        // probe is performed by HealthUsageManager on its worker thread;
+        // calling it here used to block the first tap on Xiaomi ROMs.
         manager.invalidateUsageAccessCache();
-        if(!manager.hasUsageAccess()){
-            loaded=true;snapshot=null;HealthReminderScheduler.cancel(activity);showPermission();return;
-        }
-        HealthReminderScheduler.schedule(activity);
         if(!pageBuilt)buildInteractivePage();
-        else if(snapshot==null)showLoading();
+        // The interactive shell is already in a readable loading state. Do
+        // not synchronously tear down/rebuild its dynamic children here: on a
+        // cold start that work could race the user's first tap on an app row.
         loading=true;
         final Runnable query=()->manager.refresh(new HealthUsageManager.Callback<HealthModels.HealthSnapshot>(){
             @Override public void onSuccess(HealthModels.HealthSnapshot value){
                 loading=false;loaded=true;snapshot=value;
+                if(!isAttachedToWindow() || getVisibility()!=View.VISIBLE){
+                    loaded=false;
+                    refreshQueued=true;
+                    return;
+                }
+                HealthReminderScheduler.scheduleAsync(activity);
                 updateSnapshot(value);
             }
             @Override public void onError(Throwable error){
                 loading=false;loaded=true;
-                if(error instanceof HealthUsageManager.PermissionDeniedException)showPermission();
+                if(!isAttachedToWindow() || getVisibility()!=View.VISIBLE){
+                    loaded=false;
+                    refreshQueued=true;
+                    return;
+                }
+                if(error instanceof HealthUsageManager.PermissionDeniedException){
+                    HealthReminderScheduler.cancel(activity);
+                    showPermission();
+                }
                 else showError();
             }
         });
@@ -138,8 +167,10 @@ public final class HealthUsageView extends ScrollView {
     }
 
     public void destroy(){
+        destroyed=true;
         removeCallbacks(firstFrameGate);
         iconExecutor.shutdownNow();
+        packageExecutor.shutdownNow();
         manager.shutdown();
     }
 
@@ -300,6 +331,7 @@ public final class HealthUsageView extends ScrollView {
             // parent ScrollView jump away from the controls just tapped.
             item.setClickable(true);
             item.setOnClickListener(v->{Intent intent=new Intent(activity,AppDetailActivity.class).putExtra(AppDetailActivity.EXTRA_PACKAGE_NAME,app.packageName);activity.startActivity(intent);});
+            item.setFocusable(false);item.setFocusableInTouchMode(false);
             rankingList.addView(item);
         }
     }
@@ -330,7 +362,7 @@ public final class HealthUsageView extends ScrollView {
         LinearLayout panel=card();
         LinearLayout heading=row();
         heading.addView(text("应用使用限制",18,INK,true),new LinearLayout.LayoutParams(0,-2,1));
-        Button add=button("添加应用",Color.TRANSPARENT,GREEN); add.setTextSize(12); heading.addView(add,new LinearLayout.LayoutParams(dp(92),dp(40))); panel.addView(heading);
+        Button add=button("添加应用",Color.TRANSPARENT,GREEN); add.setTextSize(12); add.setOnClickListener(v->showAppLimitDialogV2(null)); heading.addView(add,new LinearLayout.LayoutParams(dp(92),dp(40))); panel.addView(heading);
         TextView hint=text("选择某个 App 并设置每日可使用时长，达到上限后会显示限制画面。",13,MUTED,false); hint.setPadding(0,dp(7),0,dp(8)); panel.addView(hint);
         appLimitList=column();panel.addView(appLimitList);
         appLimitUsageReady=usageReady;
@@ -352,12 +384,17 @@ public final class HealthUsageView extends ScrollView {
             loadAppIconAsync(icon,limit.packageName);
             item.addView(icon,new LinearLayout.LayoutParams(dp(38),dp(38)));
             LinearLayout labels=column(); labels.setPadding(dp(10),0,dp(8),0);
-            labels.addView(text(appLabel(limit.packageName),15,INK,true));
-            TextView usage=text(usageReady?"今日已用 "+duration(usageToday(limit.packageName))+" / 上限 "+duration(limit.dailyLimitMillis):"正在读取今日使用 / 上限 "+duration(limit.dailyLimitMillis),12,MUTED,false);
+            TextView appName=text(cachedAppLabel(limit.packageName),15,INK,true);
+            loadAppLabelAsync(appName,limit.packageName);
+            labels.addView(appName);
+            long knownUsage=usageReady&&latestAppUsage.containsKey(limit.packageName)
+                ?latestAppUsage.get(limit.packageName):0L;
+            TextView usage=text(usageReady?"今日已用 "+duration(knownUsage)+" / 上限 "+duration(limit.dailyLimitMillis):"正在读取今日使用 / 上限 "+duration(limit.dailyLimitMillis),12,MUTED,false);
             labels.addView(usage);appLimitUsageViews.put(limit.packageName,usage);
             item.addView(labels,new LinearLayout.LayoutParams(0,-2,1));
             Button remove=button("移除",Color.TRANSPARENT,Color.rgb(184,74,53)); remove.setTextSize(12); LinearLayout.LayoutParams rp=new LinearLayout.LayoutParams(dp(56),dp(38)); rp.setMargins(dp(6),0,0,0); item.addView(remove,rp);
             item.setOnClickListener(v->showAppLimitDialogV2(limit));
+            item.setFocusable(false);item.setFocusableInTouchMode(false);
             remove.setOnClickListener(v->{AppLimitStore.remove(activity,limit.packageName); if(AppLimitStore.hasEnabled(activity))AppLimitService.start(activity);else AppLimitService.stop(activity); renderAppLimitRows(appLimitUsageReady);});
             appLimitList.addView(item);
         }
@@ -370,8 +407,11 @@ public final class HealthUsageView extends ScrollView {
         for(AppLimit limit:AppLimitStore.get(activity))limits.put(limit.packageName,limit);
         for(Map.Entry<String,TextView> entry:appLimitUsageViews.entrySet()){
             AppLimit limit=limits.get(entry.getKey());if(limit==null)continue;
-            long used=latestAppUsage.containsKey(limit.packageName)
-                ?latestAppUsage.get(limit.packageName):usageToday(limit.packageName);
+            // During the loading shell, do not synchronously query UsageStats.
+            // That query used to run on the UI thread for every limited app and
+            // made the first edit tap look ignored after a cold start.
+            long used=ready ? (latestAppUsage.containsKey(limit.packageName)
+                ?latestAppUsage.get(limit.packageName):0L) : 0L;
             entry.getValue().setText(ready?"今日已用 "+duration(used)+" / 上限 "+duration(limit.dailyLimitMillis):"正在读取今日使用 / 上限 "+duration(limit.dailyLimitMillis));
         }
     }
@@ -387,75 +427,202 @@ public final class HealthUsageView extends ScrollView {
                 ? cached : cached.getConstantState().newDrawable());
             return;
         }
-        iconExecutor.execute(() -> {
-            Drawable icon = manager.loadAppIcon(packageName);
-            if (icon == null) return;
-            synchronized (appIconCache) { appIconCache.put(packageName, icon); }
-            activity.runOnUiThread(() -> {
-                if (activity.isFinishing() || !packageName.equals(view.getTag())) return;
-                Drawable value;
-                synchronized (appIconCache) { value = appIconCache.get(packageName); }
-                if (value != null) {
-                    view.setImageDrawable(value.getConstantState() == null
-                        ? value : value.getConstantState().newDrawable());
-                }
+        try {
+            iconExecutor.execute(() -> {
+                Drawable icon = manager.loadAppIcon(packageName);
+                if (icon == null) return;
+                synchronized (appIconCache) { appIconCache.put(packageName, icon); }
+                activity.runOnUiThread(() -> {
+                    if (!canDeliverAsyncResult() || !packageName.equals(view.getTag())) return;
+                    Drawable value;
+                    synchronized (appIconCache) { value = appIconCache.get(packageName); }
+                    if (value != null) {
+                        view.setImageDrawable(value.getConstantState() == null
+                            ? value : value.getConstantState().newDrawable());
+                    }
+                });
             });
-        });
+        } catch (RuntimeException ignored) {
+            // The page may be tearing down; the placeholder icon is valid.
+        }
     }
 
-    private String appLabel(String pkg){
-        try{return String.valueOf(activity.getPackageManager().getApplicationLabel(activity.getPackageManager().getApplicationInfo(pkg,0)));}
-        catch(Exception e){return pkg;}
+    private String cachedAppLabel(String pkg){
+        if(pkg==null||pkg.length()==0)return "应用";
+        synchronized(appLabelCache){
+            String value=appLabelCache.get(pkg);
+            return value==null?pkg:value;
+        }
     }
 
-    private long usageToday(String pkg){
-        UsageStatsManager usage=(UsageStatsManager)activity.getSystemService(Activity.USAGE_STATS_SERVICE);
-        if(usage==null)return 0L;
-        java.util.Calendar day=java.util.Calendar.getInstance(); day.set(java.util.Calendar.HOUR_OF_DAY,0); day.set(java.util.Calendar.MINUTE,0); day.set(java.util.Calendar.SECOND,0); day.set(java.util.Calendar.MILLISECOND,0);
-        java.util.Map<String,UsageStats> values=usage.queryAndAggregateUsageStats(day.getTimeInMillis(),System.currentTimeMillis());
-        UsageStats stat=values==null?null:values.get(pkg); return stat==null?0L:stat.getTotalTimeInForeground();
+    /** Resolve a label away from the UI thread and replace the placeholder. */
+    private void loadAppLabelAsync(final TextView view,final String packageName){
+        if(view==null||packageName==null||packageName.length()==0)return;
+        view.setTag(packageName);
+        String cached;
+        synchronized(appLabelCache){cached=appLabelCache.get(packageName);}
+        if(cached!=null){view.setText(cached);return;}
+        try{
+            packageExecutor.execute(()->{
+                String value;
+                try{
+                    PackageManager pm=activity.getPackageManager();
+                    value=String.valueOf(pm.getApplicationLabel(pm.getApplicationInfo(packageName,0)));
+                }catch(Exception error){value=packageName;}
+                final String resolved=value;
+                synchronized(appLabelCache){appLabelCache.put(packageName,resolved);}
+                activity.runOnUiThread(()->{
+                    if(!canDeliverAsyncResult()||!packageName.equals(view.getTag()))return;
+                    view.setText(resolved);
+                });
+            });
+        }catch(RuntimeException ignored){
+            // The page is being destroyed; the package name placeholder is
+            // already a valid, non-blocking fallback.
+        }
+    }
+
+    /** Kept for legacy callers; use cachedAppLabel/loadAppLabelAsync on UI paths. */
+    private String appLabel(String pkg){return cachedAppLabel(pkg);}
+
+    /** Lightweight editor used for an existing limit row. */
+    private void showEditAppLimitDialog(final AppLimit editing){
+        LinearLayout form=column();
+        form.setPadding(dp(20),dp(2),dp(20),0);
+        TextView app=text(cachedAppLabel(editing.packageName),16,INK,true);
+        app.setGravity(Gravity.CENTER);
+        app.setPadding(0,0,0,dp(8));
+        loadAppLabelAsync(app,editing.packageName);
+        form.addView(app,new LinearLayout.LayoutParams(-1,dp(34)));
+        LinearLayout durationLabels=row();
+        durationLabels.addView(text("小时",12,MUTED,false),new LinearLayout.LayoutParams(0,-2,1));
+        durationLabels.addView(text("分钟",12,MUTED,false),new LinearLayout.LayoutParams(0,-2,1));
+        form.addView(durationLabels);
+        int initialMinutes=(int)Math.max(1L,Math.min(23L*60L+59L,editing.dailyLimitMillis/60000L));
+        LinearLayout pick=row();
+        NumberPicker hours=new NumberPicker(activity);
+        hours.setMinValue(0); hours.setMaxValue(23);
+        String[] hourLabels=new String[24];
+        for(int i=0;i<24;i++)hourLabels[i]=String.format(Locale.CHINA,"%02d 小时",i);
+        hours.setDisplayedValues(hourLabels); hours.setValue(initialMinutes/60);
+        NumberPicker mins=new NumberPicker(activity);
+        mins.setMinValue(0); mins.setMaxValue(59);
+        String[] minuteLabels=new String[60];
+        for(int i=0;i<60;i++)minuteLabels[i]=String.format(Locale.CHINA,"%02d 分钟",i);
+        mins.setDisplayedValues(minuteLabels); mins.setValue(initialMinutes%60);
+        pick.addView(hours,new LinearLayout.LayoutParams(0,dp(150),1));
+        pick.addView(mins,new LinearLayout.LayoutParams(0,dp(150),1));
+        form.addView(pick);
+        TextView note=text("达到每日累计时长后，当天会显示限制画面。",12,MUTED,false);
+        note.setPadding(0,dp(4),0,0); form.addView(note);
+        AlertDialog dialog=new AlertDialog.Builder(activity)
+            .setTitle("修改应用使用限制")
+            .setView(form)
+            .setNegativeButton("取消",null)
+            .setPositiveButton("保存",(d,w)->{
+                int total=hours.getValue()*60+mins.getValue();
+                if(total<1){
+                    Toast.makeText(activity,"时长至少 1 分钟",Toast.LENGTH_SHORT).show();
+                    return;
+                }
+                // Keep the package fixed to the row being edited. Never infer
+                // it from a launcher list whose order/contents may differ.
+                AppLimitStore.upsert(activity,new AppLimit(editing.packageName,
+                    total*60000L,true,editing.warningMinutes,editing.strictMode,
+                    editing.temporaryUnlock));
+                AppLimitService.start(activity);
+                renderAppLimitRows(appLimitUsageReady);
+            }).create();
+        dialog.show();
     }
 
     private void showAppLimitDialogV2(final AppLimit editing){
+        if(editing!=null){
+            showEditAppLimitDialog(editing);
+            return;
+        }
+        showAddAppLimitDialog();
+    }
+
+    /**
+     * Add mode keeps the application picker, but displays it immediately and
+     * fills it from a worker. PackageManager enumeration/loadLabel can block
+     * for seconds on vendor ROMs and must never sit in a tap handler.
+     */
+    private void showAddAppLimitDialog(){
         final PackageManager pm=activity.getPackageManager();
-        Intent launcher=new Intent(Intent.ACTION_MAIN); launcher.addCategory(Intent.CATEGORY_LAUNCHER);
-        List<ResolveInfo> apps=pm.queryIntentActivities(launcher,PackageManager.MATCH_ALL);
         final List<ResolveInfo> choices=new ArrayList<ResolveInfo>(); final List<String> labels=new ArrayList<String>();
-        for(ResolveInfo info:apps){String pkg=info.activityInfo.packageName; if(pkg.equals(activity.getPackageName()))continue; String label=String.valueOf(info.loadLabel(pm)); if(!labels.contains(label)){choices.add(info);labels.add(label);}}
-        if(choices.isEmpty()){Toast.makeText(activity,"没有找到可限制的应用",Toast.LENGTH_SHORT).show();return;}
         LinearLayout form=column(); form.setPadding(dp(20),dp(2),dp(20),0);
         TextView mode=text("每日累计使用时长（不是时间段）",13,GREEN,true); mode.setPadding(0,0,0,dp(6)); form.addView(mode);
         EditText search=new EditText(activity); search.setSingleLine(true); search.setHint("搜索应用"); search.setTextSize(15); search.setPadding(dp(12),0,dp(12),0); search.setBackground(round(Color.rgb(243,246,242),10)); form.addView(search,new LinearLayout.LayoutParams(-1,dp(50)));
         ScrollView appScroll=new ScrollView(activity); LinearLayout appList=column(); appScroll.addView(appList,new ScrollView.LayoutParams(-1,-2)); LinearLayout.LayoutParams appScrollParams=new LinearLayout.LayoutParams(-1,dp(220)); appScrollParams.setMargins(0,dp(6),0,dp(6)); form.addView(appScroll,appScrollParams);
-        int initialSelection=0;
-        if(editing!=null) for(int i=0;i<choices.size();i++) if(editing.packageName.equals(choices.get(i).activityInfo.packageName)){initialSelection=i;break;}
-        final int[] selected={initialSelection}; final TextView selectedLabel=text("已选择："+labels.get(initialSelection),14,INK,true); selectedLabel.setPadding(0,dp(3),0,dp(5)); form.addView(selectedLabel);
-        if(editing!=null){
-            mode.setVisibility(View.GONE);
-            search.setVisibility(View.GONE);
-            appScroll.setVisibility(View.GONE);
-            selectedLabel.setVisibility(View.GONE);
-        }
+        final int[] selected={-1};
+        final TextView selectedLabel=text("正在读取应用列表…",14,INK,true);
+        selectedLabel.setPadding(0,dp(3),0,dp(5)); form.addView(selectedLabel);
         LinearLayout durationLabels=row(); durationLabels.addView(text("小时",12,MUTED,false),new LinearLayout.LayoutParams(0,-2,1)); durationLabels.addView(text("分钟",12,MUTED,false),new LinearLayout.LayoutParams(0,-2,1)); form.addView(durationLabels);
-        int initialMinutes=editing==null?60:(int)Math.max(1L,editing.dailyLimitMillis/60000L);
+        int initialMinutes=60;
         LinearLayout pick=row(); NumberPicker hours=new NumberPicker(activity); hours.setMinValue(0); hours.setMaxValue(23); String[] hourLabels=new String[24]; for(int i=0;i<24;i++)hourLabels[i]=String.format(Locale.CHINA,"%02d 小时",i); hours.setDisplayedValues(hourLabels); hours.setValue(initialMinutes/60); NumberPicker mins=new NumberPicker(activity); mins.setMinValue(0); mins.setMaxValue(59); String[] minuteLabels=new String[60]; for(int i=0;i<60;i++)minuteLabels[i]=String.format(Locale.CHINA,"%02d 分钟",i); mins.setDisplayedValues(minuteLabels); mins.setValue(initialMinutes%60); pick.addView(hours,new LinearLayout.LayoutParams(0,dp(150),1)); pick.addView(mins,new LinearLayout.LayoutParams(0,dp(150),1)); form.addView(pick);
         TextView note=text("达到每日累计时长后，当天会显示限制画面；例如设置 1:00，就是当天累计使用 1 小时。",12,MUTED,false); note.setLineSpacing(dp(3),1f); note.setPadding(0,dp(4),0,0); form.addView(note);
         final Runnable[] render={null}; render[0]=()->{
-            appList.removeAllViews(); String query=search.getText().toString().trim().toLowerCase(Locale.CHINA); int shown=0;
+            appList.removeAllViews();
+            if(choices.isEmpty()){
+                TextView waiting=text("正在读取应用列表…",13,MUTED,false); waiting.setGravity(Gravity.CENTER);
+                appList.addView(waiting,new LinearLayout.LayoutParams(-1,dp(48)));
+                return;
+            }
+            String query=search.getText().toString().trim().toLowerCase(Locale.CHINA); int shown=0;
             for(int i=0;i<choices.size();i++){String label=labels.get(i); if(query.length()>0&&!label.toLowerCase(Locale.CHINA).contains(query))continue; final int index=i;
-                LinearLayout appRow=row(); appRow.setPadding(0,dp(5),0,dp(5)); ImageView icon=new ImageView(activity); icon.setImageDrawable(choices.get(i).loadIcon(pm)); appRow.addView(icon,new LinearLayout.LayoutParams(dp(40),dp(40))); TextView name=text(label,15,INK,false); name.setPadding(dp(10),0,0,0); appRow.addView(name,new LinearLayout.LayoutParams(0,dp(46),1)); appRow.setOnClickListener(v->{selected[0]=index;selectedLabel.setText("已选择："+labels.get(index));}); appList.addView(appRow); shown++; }
+                LinearLayout appRow=row(); appRow.setPadding(0,dp(5),0,dp(5)); ImageView icon=new ImageView(activity); icon.setImageResource(android.R.drawable.sym_def_app_icon); loadAppIconAsync(icon,choices.get(i).activityInfo.packageName); appRow.addView(icon,new LinearLayout.LayoutParams(dp(40),dp(40))); TextView name=text(label,15,INK,false); name.setPadding(dp(10),0,0,0); appRow.addView(name,new LinearLayout.LayoutParams(0,dp(46),1)); appRow.setOnClickListener(v->{selected[0]=index;selectedLabel.setText("已选择："+labels.get(index));}); appList.addView(appRow); shown++; }
             if(shown==0){TextView empty=text("没有匹配的应用",13,MUTED,false);empty.setGravity(Gravity.CENTER);appList.addView(empty,new LinearLayout.LayoutParams(-1,dp(48)));}
         };
-        render[0].run(); search.addTextChangedListener(new TextWatcher(){public void beforeTextChanged(CharSequence s,int st,int c,int a){} public void onTextChanged(CharSequence s,int st,int b,int c){render[0].run();} public void afterTextChanged(Editable e){}});
-        AlertDialog dialog=new AlertDialog.Builder(activity).setTitle(editing==null?"设置应用使用限制":"修改应用使用限制").setView(form).setNegativeButton("取消",null).setPositiveButton("保存",(d,w)->{
+        render[0].run();
+        search.addTextChangedListener(new TextWatcher(){public void beforeTextChanged(CharSequence s,int st,int c,int a){} public void onTextChanged(CharSequence s,int st,int b,int c){render[0].run();} public void afterTextChanged(Editable e){}});
+        AlertDialog dialog=new AlertDialog.Builder(activity).setTitle("设置应用使用限制").setView(form).setNegativeButton("取消",null).setPositiveButton("保存",(d,w)->{
+            if(selected[0]<0||selected[0]>=choices.size())return;
             int total=hours.getValue()*60+mins.getValue(); if(total<1){Toast.makeText(activity,"时长至少 1 分钟",Toast.LENGTH_SHORT).show();return;}
             String pkg=choices.get(selected[0]).activityInfo.packageName;
             AppLimitStore.upsert(activity,new AppLimit(pkg,total*60000L,true,0,true)); AppLimitService.start(activity);
+            renderAppLimitRows(appLimitUsageReady);
         }).create();
-        dialog.setOnDismissListener(v->{
-            if(snapshot!=null) updateSnapshot(snapshot);
+        dialog.setOnShowListener(ignored->{
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setEnabled(false);
         });
         dialog.show();
+        try{
+            packageExecutor.execute(()->{
+                final List<ResolveInfo> loadedChoices=new ArrayList<ResolveInfo>();
+                final List<String> loadedLabels=new ArrayList<String>();
+                try{
+                    Intent launcher=new Intent(Intent.ACTION_MAIN); launcher.addCategory(Intent.CATEGORY_LAUNCHER);
+                    List<ResolveInfo> apps=pm.queryIntentActivities(launcher,PackageManager.MATCH_ALL);
+                    for(ResolveInfo info:apps){
+                        if(info==null||info.activityInfo==null)continue;
+                        String pkg=info.activityInfo.packageName;
+                        if(pkg.equals(activity.getPackageName()))continue;
+                        String label=String.valueOf(info.loadLabel(pm));
+                        if(!loadedLabels.contains(label)){loadedChoices.add(info);loadedLabels.add(label);}
+                    }
+                }catch(RuntimeException ignoredError){}
+                activity.runOnUiThread(()->{
+                    if(!canDeliverAsyncResult()||!dialog.isShowing())return;
+                    choices.clear(); choices.addAll(loadedChoices);
+                    labels.clear(); labels.addAll(loadedLabels);
+                    if(choices.isEmpty()){
+                        selectedLabel.setText("没有找到可限制的应用");
+                        appList.removeAllViews();
+                        TextView empty=text("没有找到可限制的应用",13,MUTED,false); empty.setGravity(Gravity.CENTER);
+                        appList.addView(empty,new LinearLayout.LayoutParams(-1,dp(48)));
+                    }else{
+                        selected[0]=0;
+                        selectedLabel.setText("已选择："+labels.get(0));
+                        render[0].run();
+                        dialog.getButton(AlertDialog.BUTTON_POSITIVE).setEnabled(true);
+                    }
+                });
+            });
+        }catch(RuntimeException ignored){
+            selectedLabel.setText("无法读取应用列表");
+        }
     }
 
     private void showAppLimitDialog(){
@@ -475,6 +642,10 @@ public final class HealthUsageView extends ScrollView {
             AppLimitStore.upsert(activity,new AppLimit(pkg,total*60000L,true,0,true)); AppLimitService.start(activity);
             renderAppLimitRows(appLimitUsageReady);
         }).show();
+    }
+
+    private boolean canDeliverAsyncResult(){
+        return !destroyed&&!activity.isFinishing()&&!activity.isDestroyed();
     }
 
     private void buildScoreCard(){
@@ -518,7 +689,7 @@ public final class HealthUsageView extends ScrollView {
         new AlertDialog.Builder(activity).setTitle("连续使用提醒").setSingleChoiceItems(labels,checked,(d,which)->selected[0]=which)
             .setNegativeButton("取消",null).setPositiveButton("保存",(d,w)->{
                 manager.getSettings().setContinuousReminderMinutes(values[selected[0]]);
-                HealthReminderScheduler.reschedule(activity);
+                HealthReminderScheduler.rescheduleAsync(activity);
                 if(snapshot!=null)updateSnapshot(snapshot);
             }).show();
     }

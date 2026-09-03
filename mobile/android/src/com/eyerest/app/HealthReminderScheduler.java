@@ -6,6 +6,9 @@ import android.content.Context;
 import android.content.Intent;
 import android.os.SystemClock;
 
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+
 /**
  * 连续使用提醒的低频调度器。
  *
@@ -19,6 +22,14 @@ public final class HealthReminderScheduler {
 
     private static final long WINDOW_MILLIS = 3L * 60L * 1000L;
     private static final int REQUEST_CODE = 7401;
+    private static final ExecutorService SCHEDULER_EXECUTOR = Executors.newSingleThreadExecutor(
+        runnable -> {
+            Thread thread = new Thread(runnable, "health-reminder-scheduler");
+            // Optional alarm maintenance must never keep the app process alive
+            // after the UI and services have stopped.
+            thread.setDaemon(true);
+            return thread;
+        });
 
     private HealthReminderScheduler() {}
 
@@ -46,10 +57,37 @@ public final class HealthReminderScheduler {
         );
     }
 
+    /**
+     * Schedule without probing AppOps on the caller's thread. Xiaomi devices
+     * may synchronously service a UsageStats query while checking MODE_DEFAULT;
+     * UI pages must use this entry point after a refresh succeeds.
+     */
+    public static void scheduleAsync(final Context context) {
+        if (context == null) return;
+        try {
+            SCHEDULER_EXECUTOR.execute(new Runnable() {
+                @Override public void run() { schedule(context.getApplicationContext()); }
+            });
+        } catch (RuntimeException ignored) {
+            // Process teardown: an already-running page does not depend on
+            // the optional reminder alarm being scheduled.
+        }
+    }
+
     /** 设置变化或权限页面返回时调用；名字明确，便于 UI 层使用。 */
     public static void reschedule(Context context) {
         cancel(context);
         schedule(context);
+    }
+
+    /** Non-blocking counterpart for UI event handlers. */
+    public static void rescheduleAsync(final Context context) {
+        if (context == null) return;
+        try {
+            SCHEDULER_EXECUTOR.execute(new Runnable() {
+                @Override public void run() { reschedule(context.getApplicationContext()); }
+            });
+        } catch (RuntimeException ignored) {}
     }
 
     /** 与健康页面设置保存逻辑兼容的别名。 */

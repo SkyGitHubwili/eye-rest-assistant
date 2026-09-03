@@ -27,8 +27,12 @@ import android.widget.TextView;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Date;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 /** Full real-data summary for today and the most recent seven days. */
 public final class HealthDataActivity extends Activity {
@@ -54,6 +58,8 @@ public final class HealthDataActivity extends Activity {
     private TextView minimumValue;
     private TextView weekComparison;
     private int requestGeneration;
+    private final ExecutorService iconExecutor = Executors.newFixedThreadPool(2);
+    private final Map<String, Drawable> iconCache = new HashMap<String, Drawable>();
 
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
@@ -72,6 +78,7 @@ public final class HealthDataActivity extends Activity {
 
     @Override protected void onDestroy() {
         requestGeneration++;
+        iconExecutor.shutdownNow();
         if (manager != null) manager.shutdown();
         super.onDestroy();
     }
@@ -183,12 +190,6 @@ public final class HealthDataActivity extends Activity {
         // Invalidate any callback already in flight before deciding whether
         // the newly observed permission state is usable.
         final int generation = ++requestGeneration;
-        if (!manager.hasUsageAccess()) {
-            showState("需要使用情况访问权限",
-                "健康使用需要读取手机的应用使用时间，才能统计今日使用情况和 App 排行。",
-                "去开启", this::openUsageSettings);
-            return;
-        }
         showLoading();
         manager.refresh(new HealthUsageManager.Callback<HealthModels.HealthSnapshot>() {
             @Override public void onSuccess(HealthModels.HealthSnapshot snapshot) {
@@ -203,7 +204,7 @@ public final class HealthDataActivity extends Activity {
 
             @Override public void onError(Throwable error) {
                 if (generation != requestGeneration || isFinishing()) return;
-                if (error instanceof HealthUsageManager.PermissionDeniedException || !manager.hasUsageAccess()) {
+                if (error instanceof HealthUsageManager.PermissionDeniedException) {
                     showState("需要使用情况访问权限", "权限已关闭，无法读取真实的手机使用数据。", "去开启",
                         HealthDataActivity.this::openUsageSettings);
                 } else {
@@ -251,8 +252,8 @@ public final class HealthDataActivity extends Activity {
         row.setPadding(0, dp(7), 0, dp(7));
         row.setBackground(selectableBackground());
         ImageView icon = new ImageView(this);
-        Drawable drawable = manager.loadAppIcon(app.packageName);
-        icon.setImageDrawable(drawable != null ? drawable : getDrawable(android.R.drawable.sym_def_app_icon));
+        icon.setImageResource(android.R.drawable.sym_def_app_icon);
+        loadAppIconAsync(icon, app.packageName);
         icon.setScaleType(ImageView.ScaleType.CENTER_CROP);
         row.addView(icon, new LinearLayout.LayoutParams(dp(44), dp(44)));
 
@@ -283,6 +284,35 @@ public final class HealthDataActivity extends Activity {
             startActivity(intent);
         });
         return row;
+    }
+
+    /** PackageManager icon loading is deferred so opening this page stays responsive. */
+    private void loadAppIconAsync(final ImageView view, final String packageName) {
+        if (view == null || TextUtils.isEmpty(packageName)) return;
+        view.setTag(packageName);
+        Drawable cached;
+        synchronized (iconCache) { cached = iconCache.get(packageName); }
+        if (cached != null) {
+            view.setImageDrawable(cached.getConstantState() == null
+                ? cached : cached.getConstantState().newDrawable());
+            return;
+        }
+        try {
+            iconExecutor.execute(() -> {
+                Drawable drawable = manager.loadAppIcon(packageName);
+                if (drawable == null) return;
+                synchronized (iconCache) { iconCache.put(packageName, drawable); }
+                runOnUiThread(() -> {
+                    if (isFinishing() || !packageName.equals(view.getTag())) return;
+                    Drawable value;
+                    synchronized (iconCache) { value = iconCache.get(packageName); }
+                    if (value != null) view.setImageDrawable(value.getConstantState() == null
+                        ? value : value.getConstantState().newDrawable());
+                });
+            });
+        } catch (RuntimeException ignored) {
+            // Activity teardown; placeholder remains valid.
+        }
     }
 
     private void bindWeekSummary(List<HealthModels.DayUsage> current, List<HealthModels.DayUsage> previous) {

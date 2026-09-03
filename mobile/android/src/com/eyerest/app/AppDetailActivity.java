@@ -28,6 +28,10 @@ import java.util.ArrayList;
 import java.util.Date;
 import java.util.List;
 import java.util.Locale;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 /** Displays real UsageStats data for one installed application. */
 public final class AppDetailActivity extends Activity {
@@ -56,6 +60,8 @@ public final class AppDetailActivity extends Activity {
     private TextView sessionValue;
     private SevenDayChart chart;
     private int requestGeneration;
+    private final ExecutorService iconExecutor = Executors.newSingleThreadExecutor();
+    private final Map<String, Drawable> iconCache = new HashMap<String, Drawable>();
 
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
@@ -80,6 +86,7 @@ public final class AppDetailActivity extends Activity {
 
     @Override protected void onDestroy() {
         requestGeneration++;
+        iconExecutor.shutdownNow();
         if (manager != null) manager.shutdown();
         super.onDestroy();
     }
@@ -195,12 +202,6 @@ public final class AppDetailActivity extends Activity {
         // Invalidate callbacks from a previous query before handling the new
         // permission state, preventing stale data from resurfacing on return.
         final int generation = ++requestGeneration;
-        if (!manager.hasUsageAccess()) {
-            showState("需要使用情况访问权限",
-                "健康使用需要读取手机的应用使用时间，才能显示此应用的真实统计。",
-                "去开启", this::openUsageSettings);
-            return;
-        }
         showLoading();
         manager.loadAppDetail(packageName, new HealthUsageManager.Callback<HealthModels.AppDetail>() {
             @Override public void onSuccess(HealthModels.AppDetail detail) {
@@ -215,7 +216,7 @@ public final class AppDetailActivity extends Activity {
 
             @Override public void onError(Throwable error) {
                 if (generation != requestGeneration || isFinishing()) return;
-                if (error instanceof HealthUsageManager.PermissionDeniedException || !manager.hasUsageAccess()) {
+                if (error instanceof HealthUsageManager.PermissionDeniedException) {
                     showState("需要使用情况访问权限",
                         "权限已关闭，无法读取真实的应用使用数据。", "去开启",
                         AppDetailActivity.this::openUsageSettings);
@@ -234,8 +235,8 @@ public final class AppDetailActivity extends Activity {
         String name = TextUtils.isEmpty(detail.app.appName) ? detail.app.packageName : detail.app.appName;
         appName.setText(name);
         packageLabel.setText(detail.app.packageName);
-        Drawable icon = manager.loadAppIcon(detail.app.packageName);
-        appIcon.setImageDrawable(icon != null ? icon : getDrawable(android.R.drawable.sym_def_app_icon));
+        appIcon.setImageResource(android.R.drawable.sym_def_app_icon);
+        loadAppIconAsync(appIcon, detail.app.packageName);
         todayValue.setText(formatDuration(detail.todayMillis));
         yesterdayValue.setText(formatDuration(detail.yesterdayMillis));
         averageValue.setText(formatDuration(detail.averageMillis));
@@ -256,6 +257,32 @@ public final class AppDetailActivity extends Activity {
             launchesValue.setText("数据不可用");
             sessionValue.setText("数据不可用");
         }
+    }
+
+    private void loadAppIconAsync(final ImageView view, final String packageName) {
+        if (view == null || TextUtils.isEmpty(packageName)) return;
+        view.setTag(packageName);
+        Drawable cached;
+        synchronized (iconCache) { cached = iconCache.get(packageName); }
+        if (cached != null) {
+            view.setImageDrawable(cached.getConstantState() == null
+                ? cached : cached.getConstantState().newDrawable());
+            return;
+        }
+        try {
+            iconExecutor.execute(() -> {
+                Drawable drawable = manager.loadAppIcon(packageName);
+                if (drawable == null) return;
+                synchronized (iconCache) { iconCache.put(packageName, drawable); }
+                runOnUiThread(() -> {
+                    if (isFinishing() || !packageName.equals(view.getTag())) return;
+                    Drawable value;
+                    synchronized (iconCache) { value = iconCache.get(packageName); }
+                    if (value != null) view.setImageDrawable(value.getConstantState() == null
+                        ? value : value.getConstantState().newDrawable());
+                });
+            });
+        } catch (RuntimeException ignored) {}
     }
 
     private void showLoading() {
