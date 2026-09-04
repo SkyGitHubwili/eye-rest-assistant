@@ -37,13 +37,12 @@ public final class HealthUsageTest {
         metadata.put("a",new HealthModels.AppMetadata("a","A",true,true));
         metadata.put("b",new HealthModels.AppMetadata("b","B",true,true));
         HealthModels.DayUsage day=calculator.calculateDay(0,120*MINUTE,stats,events,metadata,true,true);
-        check(day.totalUsageMillis==90*MINUTE,"real event duration must fill packages omitted by UsageStats");
+        check(day.totalUsageMillis==60*MINUTE,"App duration must use UsageStats records only");
         check(day.totalLaunchCount==3,"foreground sessions must be counted");
         check(calculator.topApps(day,1).get(0).packageName.equals("a"),"ranking must sort by duration");
 
-        // Today's mode must prefer clipped foreground intervals over a stale
-        // UsageStats aggregate, including an interval that started yesterday
-        // and an app that is still open at the query end.
+        // Today's App duration must remain the UsageStats value even when
+        // foreground events disagree or contain an open interval.
         List<HealthModels.UsageEventRecord> todayEvents=Arrays.asList(
             event("a",-5,1),event("a",2,2),
             event("b",2,1),event("b",5,2),
@@ -58,10 +57,10 @@ public final class HealthUsageTest {
         todayMetadata.put("c",new HealthModels.AppMetadata("c","C",true,true));
         HealthModels.DayUsage today=calculator.calculateDay(0,10*MINUTE,staleStats,todayEvents,
             todayMetadata,true,true,true);
-        check(find(today,"a")==2*MINUTE,"today must clip an interval at day start");
-        check(find(today,"b")==3*MINUTE,"today must use event foreground duration");
-        check(find(today,"c")==4*MINUTE,"open foreground must run to now");
-        check(today.totalUsageMillis==9*MINUTE,"today total must not use stale UsageStats");
+        check(find(today,"a")==10*MINUTE,"today App duration must use UsageStats for a");
+        check(find(today,"b")==10*MINUTE,"today App duration must use UsageStats for b");
+        check(find(today,"c")==10*MINUTE,"today App duration must use UsageStats for c");
+        check(today.totalUsageMillis==10*MINUTE,"today total must be capped to the query range");
 
         List<HealthModels.UsageEventRecord> duplicate=Arrays.asList(
             event("d",0,1),event("d",0,1),event("d",3,2),event("d",3,2));

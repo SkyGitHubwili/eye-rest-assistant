@@ -5,6 +5,7 @@ import android.content.Intent;
 import android.graphics.drawable.Drawable;
 import android.os.Handler;
 import android.os.Looper;
+import android.util.Log;
 
 import java.util.ArrayList;
 import java.util.Calendar;
@@ -25,6 +26,7 @@ import java.util.concurrent.atomic.AtomicLong;
  * Activity/View 不需要直接承担统计逻辑。
  */
 public final class HealthUsageManager {
+    private static final String TAG = "HealthUsage";
     private static final int SNAPSHOT_DAYS = 14;
     private static final int TOP_APP_COUNT = 5;
     private static final long DETAIL_CACHE_MILLIS = 2L * 60L * 1000L;
@@ -203,15 +205,16 @@ public final class HealthUsageManager {
         for (int index = 0; index < dayStarts.size(); index++) {
             long start = dayStarts.get(index);
             long end = index + 1 < dayStarts.size() ? dayStarts.get(index + 1) : nowMillis;
-            boolean preferEvents=index==dayStarts.size()-1;
             days.add(calculator.calculateDay(start, end, statsByDay.get(index),
                 events, metadata, statsAvailabilityByDay.get(index), eventsAvailable,
-                preferEvents));
+                false));
         }
         if (!hasUsageAccess()) throw new PermissionDeniedException("Usage access was revoked");
 
         HealthModels.DayUsage today = days.get(days.size() - 1);
         HealthModels.DayUsage yesterday = days.get(days.size() - 2);
+        logDurationDiagnostics(today, events, dayStarts.get(dayStarts.size() - 1), nowMillis,
+            metadata);
         List<HealthModels.DayUsage> previous7 = immutableSlice(days, 0, 7);
         List<HealthModels.DayUsage> last7 = immutableSlice(days, 7, 14);
         List<HealthModels.AppUsage> topApps = removeOwnApp(
@@ -220,6 +223,39 @@ public final class HealthUsageManager {
             settings.getDailyGoalMillis(), settings.getContinuousReminderMillis());
         return new HealthModels.HealthSnapshot(today, yesterday, last7, previous7,
             topApps, score, nowMillis, today.hasUsageData);
+    }
+
+    /** Development diagnostic: prove the displayed duration is UsageStats-backed. */
+    private void logDurationDiagnostics(HealthModels.DayUsage today,
+                                         List<HealthModels.UsageEventRecord> events,
+                                         long dayStartMillis, long nowMillis,
+                                         Map<String, HealthModels.AppMetadata> metadata) {
+        if (today == null || today.apps == null) return;
+        Map<String, Long> eventDurations = new HashMap<String, Long>();
+        for (HealthModels.UsageInterval interval : calculator.buildIntervals(
+                events, dayStartMillis, nowMillis)) {
+            long start = Math.max(dayStartMillis, interval.startMillis);
+            long end = Math.min(nowMillis, interval.endMillis);
+            if (end <= start) continue;
+            Long old = eventDurations.get(interval.packageName);
+            eventDurations.put(interval.packageName,
+                (old == null ? 0L : old) + (end - start));
+        }
+        for (HealthModels.AppUsage app : today.apps) {
+            if (app == null) continue;
+            long usageStatsDuration = app.usageMillis;
+            long eventDuration = eventDurations.containsKey(app.packageName)
+                ? eventDurations.get(app.packageName) : 0L;
+            HealthModels.AppMetadata info = metadata == null ? null : metadata.get(app.packageName);
+            String appName = info == null ? app.appName : info.appName;
+            Log.d(TAG, "packageName=" + app.packageName
+                + ",appName=" + appName
+                + ",usageStatsDuration=" + usageStatsDuration
+                + ",eventDuration=" + eventDuration
+                + ",difference=" + (usageStatsDuration - eventDuration)
+                + ",finalDuration=" + app.usageMillis
+                + ",source=UsageStats");
+        }
     }
 
     private Map<String, HealthModels.AppMetadata> loadMetadata(Set<String> packageNames) {

@@ -33,8 +33,8 @@ public final class UsageStatsCalculator {
     }
 
     /**
-     * Calculate a day, optionally preferring real foreground intervals. Today
-     * uses this mode; historical days retain the faster UsageStats source.
+     * Calculate a day. The legacy final flag is retained for source
+     * compatibility, but App duration is never selected from UsageEvents.
      */
     public HealthModels.DayUsage calculateDay(
         long dayStartMillis,
@@ -44,7 +44,7 @@ public final class UsageStatsCalculator {
         Map<String, HealthModels.AppMetadata> metadata,
         boolean usageStatsAvailable,
         boolean eventsAvailable,
-        boolean preferEventDurations
+        boolean ignoredPreferEventDurations
     ) {
         long end = Math.max(dayStartMillis, rangeEndMillis);
         long rangeLength = Math.max(0L, end - dayStartMillis);
@@ -80,28 +80,24 @@ public final class UsageStatsCalculator {
             }
         }
 
+        // UsageStats owns App total duration whenever its query succeeded.
+        // Event-only packages are behavior evidence, not usage-time records.
         Set<String> packages = new HashSet<String>();
-        packages.addAll(statDurations.keySet());
-        packages.addAll(eventDurations.keySet());
+        if (usageStatsAvailable) packages.addAll(statDurations.keySet());
+        else packages.addAll(eventDurations.keySet());
 
-        long rawStatTotal = sum(statDurations);
         boolean hasEventEvidence = hasEventEvidence(events, intervals, dayStartMillis, end);
         boolean launchCountsAvailable = eventsAvailable
-            && (rawStatTotal == 0L || hasEventEvidence);
+            && hasEventEvidence;
         List<HealthModels.AppUsage> apps = new ArrayList<HealthModels.AppUsage>();
         long total = 0L;
         for (String packageName : packages) {
             long statDuration = value(statDurations, packageName);
             long eventDuration = value(eventDurations, packageName);
-            // Today is derived from clipped foreground intervals. Historical
-            // days keep UsageStats as the primary source for performance, with
-            // event intervals filling gaps when a ROM omits a package.
-            long duration;
-            if(preferEventDurations && eventsAvailable && hasEventEvidence){
-                duration=eventDuration>0L?eventDuration:statDuration;
-            }else{
-                duration=usageStatsAvailable&&statDuration>0L?statDuration:eventDuration;
-            }
+            // App total duration has one source of truth: Android's
+            // UsageStats.getTotalTimeInForeground(). UsageEvents remain
+            // available for launches, continuity, night usage and timelines.
+            long duration = usageStatsAvailable ? statDuration : eventDuration;
             duration = Math.min(rangeLength, Math.max(0L, duration));
             if (duration <= 0L) continue;
             HealthModels.AppMetadata info = metadata == null ? null : metadata.get(packageName);
@@ -127,13 +123,8 @@ public final class UsageStatsCalculator {
                 launchCount, packageLaunchesAvailable, info.installed, info.userFacing,
                 value(lastUsed, packageName)));
         }
-        // Some vendor ROMs return overlapping UsageStats buckets for multiple
-        // activities. Summing those buckets can falsely produce a full 24-hour
-        // day. When that happens, use the union of real foreground intervals,
-        // which cannot exceed the elapsed day and matches screen-on usage.
-        if (total > rangeLength && eventsAvailable && !intervals.isEmpty()) {
-            total = unionDuration(intervals, dayStartMillis, end);
-        }
+        // Protect the aggregate against malformed vendor values without
+        // replacing it with an event-derived duration.
         total = Math.min(rangeLength, total);
         sortApps(apps);
 
