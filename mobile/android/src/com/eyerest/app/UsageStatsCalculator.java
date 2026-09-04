@@ -51,7 +51,6 @@ public final class UsageStatsCalculator {
         List<HealthModels.UsageInterval> intervals =
             buildIntervals(events, dayStartMillis, end);
 
-        Map<String, Long> eventDurations = new HashMap<String, Long>();
         Map<String, Integer> launches = new HashMap<String, Integer>();
         Set<String> eventPackages = new HashSet<String>();
         for (HealthModels.UsageInterval interval : intervals) {
@@ -59,7 +58,6 @@ public final class UsageStatsCalculator {
             long intervalEnd = Math.min(end, interval.endMillis);
             if (intervalEnd <= start || interval.packageName.length() == 0) continue;
             eventPackages.add(interval.packageName);
-            addDuration(eventDurations, interval.packageName, intervalEnd - start);
             if (interval.startMillis >= dayStartMillis && interval.startMillis < end) {
                 Integer old = launches.get(interval.packageName);
                 launches.put(interval.packageName, old == null ? 1 : old + 1);
@@ -80,11 +78,10 @@ public final class UsageStatsCalculator {
             }
         }
 
-        // UsageStats owns App total duration whenever its query succeeded.
-        // Event-only packages are behavior evidence, not usage-time records.
+        // UsageStats owns App total duration. Event-only packages are behavior
+        // evidence, not App usage-time records, even if the stats query fails.
         Set<String> packages = new HashSet<String>();
-        if (usageStatsAvailable) packages.addAll(statDurations.keySet());
-        else packages.addAll(eventDurations.keySet());
+        packages.addAll(statDurations.keySet());
 
         boolean hasEventEvidence = hasEventEvidence(events, intervals, dayStartMillis, end);
         boolean launchCountsAvailable = eventsAvailable
@@ -93,11 +90,10 @@ public final class UsageStatsCalculator {
         long total = 0L;
         for (String packageName : packages) {
             long statDuration = value(statDurations, packageName);
-            long eventDuration = value(eventDurations, packageName);
             // App total duration has one source of truth: Android's
             // UsageStats.getTotalTimeInForeground(). UsageEvents remain
             // available for launches, continuity, night usage and timelines.
-            long duration = usageStatsAvailable ? statDuration : eventDuration;
+            long duration = statDuration;
             duration = Math.min(rangeLength, Math.max(0L, duration));
             if (duration <= 0L) continue;
             HealthModels.AppMetadata info = metadata == null ? null : metadata.get(packageName);
