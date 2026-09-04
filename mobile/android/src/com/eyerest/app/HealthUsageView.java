@@ -193,6 +193,11 @@ public final class HealthUsageView extends ScrollView {
         Button all=button("查看全部数据",Color.rgb(229,241,232),GREEN);
         all.setOnClickListener(v->activity.startActivity(new Intent(activity,HealthDataActivity.class)));
         LinearLayout.LayoutParams allParams=new LinearLayout.LayoutParams(-1,dp(50));allParams.setMargins(0,dp(20),0,0);root.addView(all,allParams);
+        Button debug=button("系统统计对照（Debug）",Color.rgb(238,244,239),MUTED);
+        debug.setOnClickListener(v->activity.startActivity(new Intent(activity,UsageDebugActivity.class)));
+        LinearLayout.LayoutParams debugParams=new LinearLayout.LayoutParams(-1,dp(46));
+        debugParams.setMargins(0,dp(8),0,0);
+        root.addView(debug,debugParams);
         TextView disclaimer=text("健康指数仅用于帮助理解使用习惯，不代表医疗诊断。",11,Color.rgb(137,148,142),false);
         disclaimer.setGravity(Gravity.CENTER);disclaimer.setPadding(0,dp(12),0,0);root.addView(disclaimer);
         pageBuilt=true;

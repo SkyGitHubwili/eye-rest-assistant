@@ -35,6 +35,7 @@
         </activity>
         <activity android:name=".AppDetailActivity" android:exported="false" />
         <activity android:name=".HealthDataActivity" android:exported="false" />
+        <activity android:name=".UsageDebugActivity" android:exported="false" />
         <service
             android:name=".EyeRestService"
             android:exported="false"

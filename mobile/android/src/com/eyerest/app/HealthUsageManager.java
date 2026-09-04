@@ -266,12 +266,15 @@ public final class HealthUsageManager {
             if (aggregateDuration <= 0L && dailyBucketDuration <= 0L && eventDuration <= 0L) continue;
             Log.d(TAG, "packageName=" + packageName
                 + ",appName=" + (info == null ? packageName : info.appName)
+                + ",UsageStats duration=" + aggregateDuration
                 + ",aggregateDuration=" + aggregateDuration
                 + ",dailyBucketDuration=" + dailyBucketDuration
                 + ",eventDuration=" + eventDuration
                 + ",screenInteractiveTime=" + screenInteractiveMillis
+                + ",final duration=" + finalDuration
                 + ",finalDuration=" + finalDuration
                 + ",finalEqualsAggregate=" + (finalDuration == aggregateDuration)
+                + ",finalEqualsUsageStats=" + (finalDuration == aggregateDuration)
                 + ",source=UsageStats");
         }
     }

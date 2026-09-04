@@ -26,6 +26,7 @@ $env:Path = "$JavaRoot\bin;$BuildTools;$env:Path"
 if ($LASTEXITCODE -ne 0) { throw 'aapt2 compile failed' }
 
 $Unsigned = Join-Path $BuildDir 'unsigned.apk'
+if (Test-Path -LiteralPath $Unsigned) { Remove-Item -LiteralPath $Unsigned -Force }
 & "$BuildTools\aapt2.exe" link -o $Unsigned -I $AndroidJar --manifest (Join-Path $ProjectRoot 'AndroidManifest.xml') --java (Join-Path $BuildDir 'gen') --min-sdk-version 26 --target-sdk-version 35 (Join-Path $BuildDir 'compiled\resources.zip')
 if ($LASTEXITCODE -ne 0) { throw 'aapt2 link failed' }
 
@@ -37,12 +38,13 @@ $ClassFiles = @(Get-ChildItem -LiteralPath (Join-Path $BuildDir 'classes') -Filt
 & "$BuildTools\d8.bat" --lib $AndroidJar --min-api 26 --output (Join-Path $BuildDir 'dex') @ClassFiles
 if ($LASTEXITCODE -ne 0) { throw 'd8 failed' }
 
-Copy-Item -LiteralPath (Join-Path $BuildDir 'dex\classes.dex') -Destination (Join-Path $BuildDir 'classes.dex')
+Copy-Item -LiteralPath (Join-Path $BuildDir 'dex\classes.dex') -Destination (Join-Path $BuildDir 'classes.dex') -Force
 Push-Location $BuildDir
 try { & "$BuildTools\aapt.exe" add $Unsigned 'classes.dex' } finally { Pop-Location }
 if ($LASTEXITCODE -ne 0) { throw 'Adding dex failed' }
 
 $Aligned = Join-Path $BuildDir 'aligned.apk'
+if (Test-Path -LiteralPath $Aligned) { Remove-Item -LiteralPath $Aligned -Force }
 & "$BuildTools\zipalign.exe" -f 4 $Unsigned $Aligned
 if ($LASTEXITCODE -ne 0) { throw 'zipalign failed' }
 
@@ -53,6 +55,7 @@ if (-not (Test-Path -LiteralPath $KeyStore)) {
 }
 
 $FinalApk = Join-Path $OutputDir 'SleepAssistant-Android.apk'
+if (Test-Path -LiteralPath $FinalApk) { Remove-Item -LiteralPath $FinalApk -Force }
 & "$BuildTools\apksigner.bat" sign --ks $KeyStore --ks-key-alias eyerest --ks-pass pass:android --key-pass pass:android --out $FinalApk $Aligned
 if ($LASTEXITCODE -ne 0) { throw 'apksigner failed' }
 & "$BuildTools\apksigner.bat" verify --verbose $FinalApk
