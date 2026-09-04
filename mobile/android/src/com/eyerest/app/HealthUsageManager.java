@@ -205,9 +205,15 @@ public final class HealthUsageManager {
         for (int index = 0; index < dayStarts.size(); index++) {
             long start = dayStarts.get(index);
             long end = index + 1 < dayStarts.size() ? dayStarts.get(index + 1) : nowMillis;
+            long screenInteractiveMillis = calculator.calculateScreenInteractiveMillis(
+                events, start, end);
+            if (index == dayStarts.size() - 1) {
+                Log.d(TAG, "screenInteractiveMillis=" + screenInteractiveMillis
+                    + ",usageStatsRecords=" + statsByDay.get(index).size());
+            }
             days.add(calculator.calculateDay(start, end, statsByDay.get(index),
                 events, metadata, statsAvailabilityByDay.get(index), eventsAvailable,
-                false));
+                false, screenInteractiveMillis));
         }
         if (!hasUsageAccess()) throw new PermissionDeniedException("Usage access was revoked");
 

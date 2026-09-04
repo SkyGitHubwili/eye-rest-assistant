@@ -29,7 +29,7 @@ public final class UsageStatsCalculator {
         boolean eventsAvailable
     ) {
         return calculateDay(dayStartMillis, rangeEndMillis, stats, events, metadata,
-            usageStatsAvailable, eventsAvailable, false);
+            usageStatsAvailable, eventsAvailable, false, 0L);
     }
 
     /**
@@ -45,6 +45,28 @@ public final class UsageStatsCalculator {
         boolean usageStatsAvailable,
         boolean eventsAvailable,
         boolean ignoredPreferEventDurations
+    ) {
+        return calculateDay(dayStartMillis, rangeEndMillis, stats, events, metadata,
+            usageStatsAvailable, eventsAvailable, ignoredPreferEventDurations, 0L);
+    }
+
+    /**
+     * Calculates a day with an optional screen-interactive upper bound. Some
+     * vendor ROMs report app foreground totals that exceed the actual time the
+     * display was interactive; the bound keeps the phone total consistent with
+     * the system screen-time surface without replacing App durations with event
+     * estimates.
+     */
+    public HealthModels.DayUsage calculateDay(
+        long dayStartMillis,
+        long rangeEndMillis,
+        List<HealthModels.AppUsageStatRecord> stats,
+        List<HealthModels.UsageEventRecord> events,
+        Map<String, HealthModels.AppMetadata> metadata,
+        boolean usageStatsAvailable,
+        boolean eventsAvailable,
+        boolean ignoredPreferEventDurations,
+        long screenInteractiveMillis
     ) {
         long end = Math.max(dayStartMillis, rangeEndMillis);
         long rangeLength = Math.max(0L, end - dayStartMillis);
@@ -122,6 +144,9 @@ public final class UsageStatsCalculator {
         // Protect the aggregate against malformed vendor values without
         // replacing it with an event-derived duration.
         total = Math.min(rangeLength, total);
+        if (screenInteractiveMillis > 0L) {
+            total = Math.min(total, Math.min(rangeLength, screenInteractiveMillis));
+        }
         sortApps(apps);
 
         HealthModels.ContinuousUsage continuous = calculateContinuousUsage(
@@ -142,6 +167,38 @@ public final class UsageStatsCalculator {
             continuous.currentStartMillis, night, totalLaunches,
             launchCountsAvailable, eventsAvailable && continuous.available,
             hasData, apps);
+    }
+
+    /** Returns the display-interactive duration represented by screen events. */
+    public long calculateScreenInteractiveMillis(
+        List<HealthModels.UsageEventRecord> events,
+        long rangeStartMillis,
+        long rangeEndMillis
+    ) {
+        if (rangeEndMillis <= rangeStartMillis || events == null || events.isEmpty()) return 0L;
+        List<HealthModels.UsageEventRecord> sorted = sortedEvents(events);
+        boolean interactive = false;
+        long interactiveStart = 0L;
+        long total = 0L;
+        for (HealthModels.UsageEventRecord event : sorted) {
+            if (event == null || event.timestampMillis > rangeEndMillis) break;
+            if (event.eventType == HealthModels.UsageEventRecord.TYPE_SCREEN_INTERACTIVE) {
+                if (!interactive) {
+                    interactive = true;
+                    interactiveStart = Math.max(rangeStartMillis, event.timestampMillis);
+                }
+            } else if (event.eventType == HealthModels.UsageEventRecord.TYPE_SCREEN_NON_INTERACTIVE) {
+                if (interactive) {
+                    total = saturatingAdd(total, Math.max(0L,
+                        Math.min(rangeEndMillis, event.timestampMillis) - interactiveStart));
+                    interactive = false;
+                }
+            }
+        }
+        if (interactive) {
+            total = saturatingAdd(total, Math.max(0L, rangeEndMillis - interactiveStart));
+        }
+        return Math.min(Math.max(0L, rangeEndMillis - rangeStartMillis), total);
     }
 
     public HealthModels.DayUsage calculateDay(
