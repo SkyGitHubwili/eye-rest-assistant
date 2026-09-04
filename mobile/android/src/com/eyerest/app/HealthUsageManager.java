@@ -205,22 +205,16 @@ public final class HealthUsageManager {
         for (int index = 0; index < dayStarts.size(); index++) {
             long start = dayStarts.get(index);
             long end = index + 1 < dayStarts.size() ? dayStarts.get(index + 1) : nowMillis;
-            long screenInteractiveMillis = calculator.calculateScreenInteractiveMillis(
-                events, start, end);
-            if (index == dayStarts.size() - 1) {
-                Log.d(TAG, "screenInteractiveMillis=" + screenInteractiveMillis
-                    + ",usageStatsRecords=" + statsByDay.get(index).size());
-            }
             days.add(calculator.calculateDay(start, end, statsByDay.get(index),
                 events, metadata, statsAvailabilityByDay.get(index), eventsAvailable,
-                false, screenInteractiveMillis));
+                false));
         }
         if (!hasUsageAccess()) throw new PermissionDeniedException("Usage access was revoked");
 
         HealthModels.DayUsage today = days.get(days.size() - 1);
         HealthModels.DayUsage yesterday = days.get(days.size() - 2);
-        logDurationDiagnostics(today, events, dayStarts.get(dayStarts.size() - 1), nowMillis,
-            metadata);
+        logDurationDiagnostics(today, statsByDay.get(statsByDay.size() - 1), events,
+            dayStarts.get(dayStarts.size() - 1), nowMillis, metadata);
         List<HealthModels.DayUsage> previous7 = immutableSlice(days, 0, 7);
         List<HealthModels.DayUsage> last7 = immutableSlice(days, 7, 14);
         List<HealthModels.AppUsage> topApps = removeOwnApp(
@@ -233,10 +227,21 @@ public final class HealthUsageManager {
 
     /** Development diagnostic: prove the displayed duration is UsageStats-backed. */
     private void logDurationDiagnostics(HealthModels.DayUsage today,
+                                         List<HealthModels.AppUsageStatRecord> stats,
                                          List<HealthModels.UsageEventRecord> events,
                                          long dayStartMillis, long nowMillis,
                                          Map<String, HealthModels.AppMetadata> metadata) {
         if (today == null || today.apps == null) return;
+        Map<String, Long> usageStatsDurations = new HashMap<String, Long>();
+        if (stats != null) {
+            for (HealthModels.AppUsageStatRecord stat : stats) {
+                if (stat != null && stat.packageName.length() > 0) {
+                    Long old = usageStatsDurations.get(stat.packageName);
+                    usageStatsDurations.put(stat.packageName,
+                        old == null ? stat.usageMillis : saturatingAdd(old, stat.usageMillis));
+                }
+            }
+        }
         Map<String, Long> eventDurations = new HashMap<String, Long>();
         for (HealthModels.UsageInterval interval : calculator.buildIntervals(
                 events, dayStartMillis, nowMillis)) {
@@ -249,7 +254,8 @@ public final class HealthUsageManager {
         }
         for (HealthModels.AppUsage app : today.apps) {
             if (app == null) continue;
-            long usageStatsDuration = app.usageMillis;
+            long usageStatsDuration = usageStatsDurations.containsKey(app.packageName)
+                ? usageStatsDurations.get(app.packageName) : app.usageMillis;
             long eventDuration = eventDurations.containsKey(app.packageName)
                 ? eventDurations.get(app.packageName) : 0L;
             HealthModels.AppMetadata info = metadata == null ? null : metadata.get(app.packageName);
@@ -260,6 +266,7 @@ public final class HealthUsageManager {
                 + ",eventDuration=" + eventDuration
                 + ",difference=" + (usageStatsDuration - eventDuration)
                 + ",finalDuration=" + app.usageMillis
+                + ",finalEqualsUsageStats=" + (app.usageMillis == usageStatsDuration)
                 + ",source=UsageStats");
         }
     }
@@ -300,6 +307,11 @@ public final class HealthUsageManager {
             result.add(day.getTimeInMillis());
         }
         return result;
+    }
+
+    private static long saturatingAdd(long left, long right) {
+        if (right > 0L && left > Long.MAX_VALUE - right) return Long.MAX_VALUE;
+        return left + right;
     }
 
     private static List<HealthModels.DayUsage> immutableSlice(

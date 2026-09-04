@@ -117,23 +117,9 @@ public final class UsageStatsRepository {
             return Collections.emptyList();
         }
         List<UsageStats> raw = null;
-        String source = "daily";
-        // Xiaomi/MIUI has been observed returning a cumulative or otherwise
-        // inflated value from queryAndAggregateUsageStats for a partial day.
-        // The daily bucket API keeps the requested day boundary explicit and
-        // is also the API used by Android's own per-day usage surfaces.
-        try {
-            raw = usageStatsManager.queryUsageStats(
-                UsageStatsManager.INTERVAL_DAILY, beginMillis, endMillis);
-        } catch (RuntimeException error) {
-            lastQueryError = error.getClass().getSimpleName();
-            Log.w(TAG, "queryUsageStats(INTERVAL_DAILY) failed", error);
-        }
-        if (raw == null || raw.isEmpty()) {
-            source = "aggregate";
-            raw = null;
-        }
-        if (raw == null) {
+        String source = "aggregate";
+        // App duration is defined by the system aggregate API. This is the
+        // single primary source for both today and historical days.
         try {
             Map<String, UsageStats> aggregate = usageStatsManager
                 .queryAndAggregateUsageStats(beginMillis, endMillis);
@@ -144,14 +130,14 @@ public final class UsageStatsRepository {
             lastQueryError = error.getClass().getSimpleName();
             Log.w(TAG, "queryAndAggregateUsageStats failed", error);
         }
-        }
-        // Some vendor implementations expose the bucket API but return an
-        // empty aggregate for a partial local day. Keep a bucket fallback.
+        // Keep a narrowly-scoped compatibility fallback only when the primary
+        // aggregate API is unavailable or empty. It never replaces a non-empty
+        // aggregate result.
         if (raw == null || raw.isEmpty()) {
-            source = "buckets";
+            source = "daily-fallback";
             try {
                 raw = usageStatsManager.queryUsageStats(
-                    UsageStatsManager.INTERVAL_BEST, beginMillis, endMillis);
+                    UsageStatsManager.INTERVAL_DAILY, beginMillis, endMillis);
             } catch (RuntimeException error) {
                 lastQueryError = error.getClass().getSimpleName();
                 Log.w(TAG, "queryUsageStats failed", error);

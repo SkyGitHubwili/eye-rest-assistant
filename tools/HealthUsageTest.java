@@ -60,16 +60,8 @@ public final class HealthUsageTest {
         check(find(today,"a")==10*MINUTE,"today App duration must use UsageStats for a");
         check(find(today,"b")==10*MINUTE,"today App duration must use UsageStats for b");
         check(find(today,"c")==10*MINUTE,"today App duration must use UsageStats for c");
-        check(today.totalUsageMillis==10*MINUTE,"today total must be capped to the query range");
-
-        List<HealthModels.UsageEventRecord> screenEvents=Arrays.asList(
-            event("",0,15), event("",30,16), event("",40,15));
-        check(calculator.calculateScreenInteractiveMillis(screenEvents,0,60*MINUTE)
-            ==50*MINUTE,"screen interactive duration should follow screen events");
-        HealthModels.DayUsage bounded=calculator.calculateDay(0,120*MINUTE,staleStats,
-            screenEvents,todayMetadata,true,true,false,50*MINUTE);
-        check(bounded.totalUsageMillis==50*MINUTE,
-            "vendor app totals must not exceed screen interactive duration");
+        check(today.totalUsageMillis==30*MINUTE,
+            "App total must be the sum of UsageStats durations, independent of screen time");
 
         List<HealthModels.UsageEventRecord> duplicate=Arrays.asList(
             event("d",0,1),event("d",0,1),event("d",3,2),event("d",3,2));
@@ -93,7 +85,7 @@ public final class HealthUsageTest {
 
         AppLimit limit=new AppLimit("pkg",30*MINUTE,true,5,false);
         check(limit.withTemporaryUnlock(true).temporaryUnlock,"V2 temporary unlock contract must be preserved");
-        System.out.println("HealthUsageTest: 20 checks passed");
+        System.out.println("HealthUsageTest: 18 checks passed");
     }
 
     private static HealthModels.UsageEventRecord event(String pkg,long minute,int type){
