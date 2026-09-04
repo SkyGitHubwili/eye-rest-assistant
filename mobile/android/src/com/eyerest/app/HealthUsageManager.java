@@ -213,8 +213,8 @@ public final class HealthUsageManager {
 
         HealthModels.DayUsage today = days.get(days.size() - 1);
         HealthModels.DayUsage yesterday = days.get(days.size() - 2);
-        logDurationDiagnostics(today, statsByDay.get(statsByDay.size() - 1), events,
-            dayStarts.get(dayStarts.size() - 1), nowMillis, metadata);
+        logDurationDiagnostics(today, events, dayStarts.get(dayStarts.size() - 1),
+            nowMillis, metadata);
         List<HealthModels.DayUsage> previous7 = immutableSlice(days, 0, 7);
         List<HealthModels.DayUsage> last7 = immutableSlice(days, 7, 14);
         List<HealthModels.AppUsage> topApps = removeOwnApp(
@@ -227,21 +227,14 @@ public final class HealthUsageManager {
 
     /** Development diagnostic: prove the displayed duration is UsageStats-backed. */
     private void logDurationDiagnostics(HealthModels.DayUsage today,
-                                         List<HealthModels.AppUsageStatRecord> stats,
                                          List<HealthModels.UsageEventRecord> events,
                                          long dayStartMillis, long nowMillis,
                                          Map<String, HealthModels.AppMetadata> metadata) {
         if (today == null || today.apps == null) return;
-        Map<String, Long> usageStatsDurations = new HashMap<String, Long>();
-        if (stats != null) {
-            for (HealthModels.AppUsageStatRecord stat : stats) {
-                if (stat != null && stat.packageName.length() > 0) {
-                    Long old = usageStatsDurations.get(stat.packageName);
-                    usageStatsDurations.put(stat.packageName,
-                        old == null ? stat.usageMillis : saturatingAdd(old, stat.usageMillis));
-                }
-            }
-        }
+        Map<String, Long> aggregate = repository.queryAggregateDurationsForDebug(
+            dayStartMillis, nowMillis);
+        Map<String, Long> daily = repository.queryDailyDurationsForDebug(
+            dayStartMillis, nowMillis);
         Map<String, Long> eventDurations = new HashMap<String, Long>();
         for (HealthModels.UsageInterval interval : calculator.buildIntervals(
                 events, dayStartMillis, nowMillis)) {
@@ -252,23 +245,62 @@ public final class HealthUsageManager {
             eventDurations.put(interval.packageName,
                 (old == null ? 0L : old) + (end - start));
         }
+        Map<String, Long> finalDurations = new HashMap<String, Long>();
         for (HealthModels.AppUsage app : today.apps) {
-            if (app == null) continue;
-            long usageStatsDuration = usageStatsDurations.containsKey(app.packageName)
-                ? usageStatsDurations.get(app.packageName) : app.usageMillis;
-            long eventDuration = eventDurations.containsKey(app.packageName)
-                ? eventDurations.get(app.packageName) : 0L;
-            HealthModels.AppMetadata info = metadata == null ? null : metadata.get(app.packageName);
-            String appName = info == null ? app.appName : info.appName;
-            Log.d(TAG, "packageName=" + app.packageName
-                + ",appName=" + appName
-                + ",usageStatsDuration=" + usageStatsDuration
+            if (app != null) finalDurations.put(app.packageName, app.usageMillis);
+        }
+        Set<String> packages = new HashSet<String>();
+        packages.addAll(aggregate.keySet());
+        packages.addAll(daily.keySet());
+        packages.addAll(finalDurations.keySet());
+        long screenInteractiveMillis = screenInteractiveDuration(events, dayStartMillis, nowMillis);
+        for (String packageName : packages) {
+            if (packageName == null || packageName.length() == 0) continue;
+            long aggregateDuration = value(aggregate, packageName);
+            long dailyBucketDuration = value(daily, packageName);
+            long eventDuration = eventDurations.containsKey(packageName)
+                ? eventDurations.get(packageName) : 0L;
+            long finalDuration = value(finalDurations, packageName);
+            HealthModels.AppMetadata info = metadata == null ? null : metadata.get(packageName);
+            if (info != null && (!info.installed || !info.userFacing)) continue;
+            if (aggregateDuration <= 0L && dailyBucketDuration <= 0L && eventDuration <= 0L) continue;
+            Log.d(TAG, "packageName=" + packageName
+                + ",appName=" + (info == null ? packageName : info.appName)
+                + ",aggregateDuration=" + aggregateDuration
+                + ",dailyBucketDuration=" + dailyBucketDuration
                 + ",eventDuration=" + eventDuration
-                + ",difference=" + (usageStatsDuration - eventDuration)
-                + ",finalDuration=" + app.usageMillis
-                + ",finalEqualsUsageStats=" + (app.usageMillis == usageStatsDuration)
+                + ",screenInteractiveTime=" + screenInteractiveMillis
+                + ",finalDuration=" + finalDuration
+                + ",finalEqualsAggregate=" + (finalDuration == aggregateDuration)
                 + ",source=UsageStats");
         }
+    }
+
+    private static long value(Map<String, Long> values, String key) {
+        Long result = values == null ? null : values.get(key);
+        return result == null ? 0L : Math.max(0L, result);
+    }
+
+    /** Debug-only screen activity total; never feeds App duration or UI data. */
+    private static long screenInteractiveDuration(List<HealthModels.UsageEventRecord> events,
+                                                  long start, long end) {
+        if (events == null || end <= start) return 0L;
+        boolean active = false;
+        long activeStart = 0L;
+        long total = 0L;
+        for (HealthModels.UsageEventRecord event : events) {
+            if (event == null || event.timestampMillis > end) break;
+            if (event.eventType == HealthModels.UsageEventRecord.TYPE_SCREEN_INTERACTIVE) {
+                if (!active) { active = true; activeStart = Math.max(start, event.timestampMillis); }
+            } else if (event.eventType == HealthModels.UsageEventRecord.TYPE_SCREEN_NON_INTERACTIVE
+                && active) {
+                total = saturatingAdd(total, Math.max(0L,
+                    Math.min(end, event.timestampMillis) - activeStart));
+                active = false;
+            }
+        }
+        if (active) total = saturatingAdd(total, Math.max(0L, end - activeStart));
+        return Math.min(Math.max(0L, end - start), total);
     }
 
     private Map<String, HealthModels.AppMetadata> loadMetadata(Set<String> packageNames) {

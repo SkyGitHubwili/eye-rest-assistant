@@ -177,6 +177,47 @@ public final class UsageStatsRepository {
         return result;
     }
 
+    /** Debug-only A/B sample: raw aggregate UsageStats durations. */
+    public Map<String, Long> queryAggregateDurationsForDebug(long beginMillis, long endMillis) {
+        Map<String, Long> result = new HashMap<String, Long>();
+        if (usageStatsManager == null || endMillis <= beginMillis) return result;
+        try {
+            Map<String, UsageStats> aggregate = usageStatsManager
+                .queryAndAggregateUsageStats(beginMillis, endMillis);
+            if (aggregate != null) {
+                for (UsageStats stat : aggregate.values()) {
+                    if (stat == null || stat.getPackageName() == null) continue;
+                    result.put(stat.getPackageName(), Math.max(0L,
+                        stat.getTotalTimeInForeground()));
+                }
+            }
+        } catch (RuntimeException error) {
+            Log.w(TAG, "debug aggregate query failed", error);
+        }
+        return result;
+    }
+
+    /** Debug-only A/B sample: raw daily-bucket UsageStats durations. */
+    public Map<String, Long> queryDailyDurationsForDebug(long beginMillis, long endMillis) {
+        Map<String, Long> result = new HashMap<String, Long>();
+        if (usageStatsManager == null || endMillis <= beginMillis) return result;
+        try {
+            List<UsageStats> values = usageStatsManager.queryUsageStats(
+                UsageStatsManager.INTERVAL_DAILY, beginMillis, endMillis);
+            if (values != null) {
+                for (UsageStats stat : values) {
+                    if (stat == null || stat.getPackageName() == null) continue;
+                    Long old = result.get(stat.getPackageName());
+                    long value = Math.max(0L, stat.getTotalTimeInForeground());
+                    result.put(stat.getPackageName(), old == null ? value : saturatingAdd(old, value));
+                }
+            }
+        } catch (RuntimeException error) {
+            Log.w(TAG, "debug daily query failed", error);
+        }
+        return result;
+    }
+
     /** 兼容性别名，便于调用方按 Android API 命名。 */
     public List<HealthModels.AppUsageStatRecord> queryUsageStats(long beginMillis, long endMillis) {
         return queryUsageStatsRecords(beginMillis, endMillis);
