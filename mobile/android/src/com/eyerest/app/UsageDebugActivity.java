@@ -218,8 +218,7 @@ public final class UsageDebugActivity extends Activity {
                 ? 0L : Math.max(0L, daily.getTotalTimeInForeground());
             long eventDuration = value(snapshot.events, packageName);
             long finalDuration = usageStatsDuration;
-            long visibleDuration = aggregate == null
-                ? 0L : Math.max(0L, aggregate.getTotalTimeVisible());
+            long visibleDuration = totalTimeVisible(aggregate);
             Log.d(TAG, "packageName=" + packageName
                 + ",UsageStats duration=" + usageStatsDuration
                 + ",eventDuration=" + eventDuration
@@ -259,7 +258,7 @@ public final class UsageDebugActivity extends Activity {
             UsageStats aggregate = snapshot.aggregate.get(pkg);
             UsageStats daily = snapshot.daily.get(pkg);
             long aggregateDuration = aggregate == null ? 0L : aggregate.getTotalTimeInForeground();
-            long visibleDuration = aggregate == null ? 0L : aggregate.getTotalTimeVisible();
+            long visibleDuration = totalTimeVisible(aggregate);
             long dailyDuration = daily == null ? 0L : daily.getTotalTimeInForeground();
             long eventDuration = value(snapshot.events, pkg);
             LinearLayout appCard = card();
@@ -290,7 +289,7 @@ public final class UsageDebugActivity extends Activity {
             UsageStats stat = snapshot.aggregate.get(PACKAGES[i]);
             if (stat == null) continue;
             TextView line = text(NAMES[i] + "：最后使用 " + dateTime(stat.getLastTimeUsed())
-                + "；最后可见 " + dateTime(stat.getLastTimeVisible()) + "；前台服务 "
+                + "；最后可见 " + dateTime(lastTimeVisible(stat)) + "；前台服务 "
                 + format(foregroundServiceDuration(stat)), 12, MUTED, false);
             line.setPadding(0, dp(8), 0, 0);
             details.addView(line);
@@ -305,6 +304,18 @@ public final class UsageDebugActivity extends Activity {
     private long foregroundServiceDuration(UsageStats stat) {
         if (stat == null || Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return 0L;
         return Math.max(0L, stat.getTotalTimeForegroundServiceUsed());
+    }
+
+    /** totalTimeVisible/lastTimeVisible were added in API 29; keep this
+     * diagnostics screen usable on the app's Android 8+ minimum SDK. */
+    private long totalTimeVisible(UsageStats stat) {
+        if (stat == null || Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return 0L;
+        return Math.max(0L, stat.getTotalTimeVisible());
+    }
+
+    private long lastTimeVisible(UsageStats stat) {
+        if (stat == null || Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return 0L;
+        return Math.max(0L, stat.getLastTimeVisible());
     }
 
     private void addMetric(LinearLayout card, String label, long millis) {
