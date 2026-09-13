@@ -37,6 +37,9 @@ public final class AppLimitService extends Service {
     private View overlay;
     private String blockedPackage;
     private long overlayShownAt;
+    private com.eyerest.app.ledger.UsageEngine.Day usageCache;
+    private long usageCacheAt;
+    private java.time.LocalDate usageCacheDate;
 
     public static void start(Context context) {
         Intent i = new Intent(context, AppLimitService.class);
@@ -82,10 +85,15 @@ public final class AppLimitService extends Service {
     }
 
     private long usageToday(String pkg) {
-        UsageStatsManager manager = (UsageStatsManager)getSystemService(USAGE_STATS_SERVICE); if (manager == null) return 0L;
-        Calendar day = Calendar.getInstance(); day.set(Calendar.HOUR_OF_DAY,0); day.set(Calendar.MINUTE,0); day.set(Calendar.SECOND,0); day.set(Calendar.MILLISECOND,0);
-        Map<String, UsageStats> stats = manager.queryAndAggregateUsageStats(day.getTimeInMillis(), System.currentTimeMillis());
-        UsageStats value = stats == null ? null : stats.get(pkg); return value == null ? 0L : value.getTotalTimeInForeground();
+        java.time.LocalDate date=java.time.LocalDate.now();
+        long now=android.os.SystemClock.elapsedRealtime();
+        if(usageCache==null || !date.equals(usageCacheDate) || now-usageCacheAt>=1000L){
+            try(com.eyerest.app.ledger.UsageRepository ledger=new com.eyerest.app.ledger.UsageRepository(this)){
+                usageCache=ledger.load(date);usageCacheDate=date;usageCacheAt=now;
+            }catch(Exception e){Log.w(TAG,"ScreenLedger usage unavailable",e);return 0L;}
+        }
+        com.eyerest.app.ledger.UsageEngine.App value=usageCache.apps.get(pkg);
+        return value==null?0L:value.millis;
     }
 
     private String currentForegroundPackage() {

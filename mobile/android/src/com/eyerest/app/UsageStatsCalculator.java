@@ -50,6 +50,7 @@ public final class UsageStatsCalculator {
         long rangeLength = Math.max(0L, end - dayStartMillis);
         List<HealthModels.UsageInterval> intervals =
             buildIntervals(events, dayStartMillis, end);
+        Map<String, Long> eventDurations = new HashMap<String, Long>();
 
         Map<String, Integer> launches = new HashMap<String, Integer>();
         Set<String> eventPackages = new HashSet<String>();
@@ -58,6 +59,7 @@ public final class UsageStatsCalculator {
             long intervalEnd = Math.min(end, interval.endMillis);
             if (intervalEnd <= start || interval.packageName.length() == 0) continue;
             eventPackages.add(interval.packageName);
+            addDuration(eventDurations, interval.packageName, intervalEnd - start);
             if (interval.startMillis >= dayStartMillis && interval.startMillis < end) {
                 Integer old = launches.get(interval.packageName);
                 launches.put(interval.packageName, old == null ? 1 : old + 1);
@@ -169,39 +171,30 @@ public final class UsageStatsCalculator {
         List<HealthModels.UsageEventRecord> events = sortedEvents(source);
         List<HealthModels.UsageInterval> intervals =
             new ArrayList<HealthModels.UsageInterval>();
-        Map<String, Long> activeStarts = new HashMap<String, Long>();
-        String currentPackage = null;
+        Map<String, Long> openStarts = new HashMap<String, Long>();
         for (HealthModels.UsageEventRecord event : events) {
             if (event == null || event.timestampMillis > rangeEndMillis) break;
             if (event.isForeground()) {
                 if (event.packageName.length() == 0) continue;
-                String packageName=event.packageName;
-                if(currentPackage!=null&&!currentPackage.equals(packageName)){
-                    Long start=activeStarts.remove(currentPackage);
-                    if(start!=null)addInterval(intervals,currentPackage,start,event.timestampMillis,
-                        rangeStartMillis, false);
+                if (!openStarts.containsKey(event.packageName)) {
+                    openStarts.put(event.packageName, event.timestampMillis);
                 }
-                // Repeated RESUMED/FOREGROUND events for the same package do
-                // not create overlapping sessions.
-                if(!activeStarts.containsKey(packageName))activeStarts.put(packageName,event.timestampMillis);
-                currentPackage=packageName;
             } else if (event.isBackground()) {
-                Long start=activeStarts.remove(event.packageName);
-                if(start!=null)addInterval(intervals,event.packageName,start,event.timestampMillis,
-                    rangeStartMillis, false);
-                if(event.packageName.equals(currentPackage)){
-                    currentPackage=null;
+                Long start = openStarts.remove(event.packageName);
+                if (start != null) {
+                    addInterval(intervals, event.packageName, start, event.timestampMillis,
+                        rangeStartMillis, false);
                 }
             } else if (event.isHardBreak()) {
-                for(Map.Entry<String,Long> active:new ArrayList<Map.Entry<String,Long>>(activeStarts.entrySet())){
-                    addInterval(intervals,active.getKey(),active.getValue(),event.timestampMillis,
+                for (Map.Entry<String, Long> entry : new ArrayList<Map.Entry<String, Long>>(openStarts.entrySet())) {
+                    addInterval(intervals, entry.getKey(), entry.getValue(), event.timestampMillis,
                         rangeStartMillis, false);
                 }
-                activeStarts.clear();currentPackage=null;
+                openStarts.clear();
             }
         }
-        for(Map.Entry<String,Long> active:activeStarts.entrySet()){
-            addInterval(intervals,active.getKey(),active.getValue(),rangeEndMillis,
+        for (Map.Entry<String, Long> entry : openStarts.entrySet()) {
+            addInterval(intervals, entry.getKey(), entry.getValue(), rangeEndMillis,
                 rangeStartMillis, true);
         }
         return mergeIntervals(intervals);

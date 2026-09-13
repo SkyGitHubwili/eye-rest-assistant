@@ -11,3 +11,8 @@ mobile/android/eyerest-debug.keystore
 local.properties
 .idea/
 *.apk
+*.class
+mobile/android/build-staging/
+mobile/android/release/
+tools/screenledger-test-output/
+tools/test-output/

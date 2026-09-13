@@ -47,6 +47,7 @@ public final class UsageDebugActivity extends Activity {
     private UsageStatsManager usageStatsManager;
     private UsageStatsRepository repository;
     private UsageStatsCalculator calculator;
+    private UsageTrackingStore trackingStore;
     private final android.os.Handler mainHandler = new android.os.Handler();
     private final java.util.concurrent.ExecutorService executor =
         java.util.concurrent.Executors.newSingleThreadExecutor();
@@ -60,6 +61,7 @@ public final class UsageDebugActivity extends Activity {
         usageStatsManager = (UsageStatsManager)getSystemService(Context.USAGE_STATS_SERVICE);
         repository = new UsageStatsRepository(this);
         calculator = new UsageStatsCalculator();
+        trackingStore = new UsageTrackingStore(this);
         setContentView(buildScreen());
         load();
     }
@@ -154,8 +156,10 @@ public final class UsageDebugActivity extends Activity {
         List<HealthModels.UsageEventRecord> events = repository.queryEventRecords(start, now);
         Map<String, Long> eventDurations = eventDurations(events, start, now);
         long screen = screenInteractiveDuration(events, start, now);
+        Map<String, Long> localLedger = trackingStore.readCombined(
+            new SimpleDateFormat("yyyyMMdd", Locale.US).format(new Date(start)));
         DebugSnapshot snapshot = new DebugSnapshot(start, now, aggregateRaw, dailyByPackage,
-            eventDurations, screen);
+            eventDurations, screen, localLedger);
         logSnapshot(snapshot);
         return snapshot;
     }
@@ -242,6 +246,16 @@ public final class UsageDebugActivity extends Activity {
         note.setLineSpacing(dp(3), 1f);
         note.setPadding(0, 0, 0, dp(12));
         content.addView(note);
+
+        long localTotal = 0L;
+        for (Long value : snapshot.localLedger.values()) {
+            if (value != null && value > 0L) localTotal += value;
+        }
+        LinearLayout ledgerCard = card();
+        ledgerCard.addView(text("方案 B：本地后台会话账本", 16, INK, true));
+        ledgerCard.addView(text(format(localTotal), 25, GREEN, true));
+        ledgerCard.addView(text("由后台服务按会话保存；明天从零点开始最有比较意义。", 12, MUTED, false));
+        content.addView(ledgerCard, gapParams(4));
 
         LinearLayout screenCard = card();
         screenCard.addView(text("屏幕活跃时间（独立指标）", 16, INK, true));
@@ -424,15 +438,18 @@ public final class UsageDebugActivity extends Activity {
         final Map<String, UsageStats> daily;
         final Map<String, Long> events;
         final long screen;
+        final Map<String, Long> localLedger;
 
         DebugSnapshot(long start, long end, Map<String, UsageStats> aggregate,
-                      Map<String, UsageStats> daily, Map<String, Long> events, long screen) {
+                      Map<String, UsageStats> daily, Map<String, Long> events, long screen,
+                      Map<String, Long> localLedger) {
             this.start = start;
             this.end = end;
             this.aggregate = aggregate == null ? Collections.emptyMap() : aggregate;
             this.daily = daily == null ? Collections.emptyMap() : daily;
             this.events = events == null ? Collections.emptyMap() : events;
             this.screen = Math.max(0L, screen);
+            this.localLedger = localLedger == null ? Collections.emptyMap() : localLedger;
         }
     }
 }

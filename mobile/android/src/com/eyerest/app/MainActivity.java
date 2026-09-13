@@ -47,7 +47,7 @@ public class MainActivity extends Activity {
     private Spinner sleepStartHourSpinner, sleepStartMinuteSpinner, sleepWakeHourSpinner, sleepWakeMinuteSpinner;
     private TextView sleepStartPeriod, sleepWakePeriod;
     private View eyePage, sleepPage;
-    private HealthUsageView healthPage;
+    private com.eyerest.app.ledger.ScreenLedgerView healthPage;
     private NavItem eyeNavButton, sleepNavButton, healthNavButton;
     private int currentPage = PAGE_EYE;
     private final android.os.Handler handler = new android.os.Handler();
@@ -58,6 +58,8 @@ public class MainActivity extends Activity {
         super.onCreate(state);
         prefs = getSharedPreferences("settings", MODE_PRIVATE);
         if (AppLimitStore.hasEnabled(this)) AppLimitService.start(this);
+        stopService(new Intent(this, UsageTrackingService.class));
+        com.eyerest.app.ledger.ArchiveJob.schedule(this);
         if(state!=null)currentPage=state.getInt("current_page",PAGE_EYE);
         else if(PAGE_HEALTH_NAME.equals(getIntent().getStringExtra(EXTRA_PAGE)))currentPage=PAGE_HEALTH;
         else currentPage=Math.max(PAGE_EYE,Math.min(PAGE_HEALTH,prefs.getInt("current_page",PAGE_EYE)));
@@ -120,7 +122,7 @@ public class MainActivity extends Activity {
         sleepPage=sleepScroll;
         pages.addView(sleepPage,new FrameLayout.LayoutParams(-1,-1));
 
-        healthPage=new HealthUsageView(this);
+        healthPage=new com.eyerest.app.ledger.ScreenLedgerView(this);
         pages.addView(healthPage,new FrameLayout.LayoutParams(-1,-1));
 
         LinearLayout sleepHeader=row();
@@ -443,6 +445,7 @@ public class MainActivity extends Activity {
         if(eyePage!=null)eyePage.setVisibility(currentPage==PAGE_EYE?View.VISIBLE:View.GONE);
         if(sleepPage!=null)sleepPage.setVisibility(currentPage==PAGE_SLEEP?View.VISIBLE:View.GONE);
         if(healthPage!=null)healthPage.setVisibility(currentPage==PAGE_HEALTH?View.VISIBLE:View.GONE);
+        if(healthPage!=null)healthPage.setActive(currentPage==PAGE_HEALTH);
         styleNavButton(eyeNavButton,currentPage==PAGE_EYE);
         styleNavButton(sleepNavButton,currentPage==PAGE_SLEEP);
         styleNavButton(healthNavButton,currentPage==PAGE_HEALTH);
@@ -611,6 +614,7 @@ public class MainActivity extends Activity {
     }
     @Override protected void onActivityResult(int request, int result, Intent data) {
         super.onActivityResult(request,result,data);
+        if(healthPage!=null)healthPage.onActivityResult(request,result,data);
         if ((request!=PICK_IMAGE&&request!=PICK_SLEEP_IMAGE) || result!=RESULT_OK || data==null) return;
         String targetName=request==PICK_SLEEP_IMAGE?"sleep_warning_image":"break_image";
         try (InputStream in=getContentResolver().openInputStream(data.getData()); FileOutputStream out=new FileOutputStream(new File(getFilesDir(),targetName))) {
@@ -755,6 +759,7 @@ public class MainActivity extends Activity {
         }
     }
     @Override protected void onStop() {
+        if(healthPage!=null)healthPage.setActive(false);
         if(prefs.getBoolean("keep_running_closed",false)&&prefs.getBoolean("mode_started",false)&&!"off".equals(effectiveMode()))
             service(EyeRestService.ACTION_REEVALUATE);
         if(!SleepSettings.MODE_OFF.equals(prefs.getString("sleep_mode",SleepSettings.MODE_OFF)))startSleepService();

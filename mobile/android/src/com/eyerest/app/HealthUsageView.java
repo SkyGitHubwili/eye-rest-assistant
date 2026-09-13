@@ -41,6 +41,7 @@ public final class HealthUsageView extends ScrollView {
     private static final int MUTED=Color.rgb(105,122,114);
     private static final int SURFACE=Color.rgb(245,247,242);
     private final Activity activity;
+    private final boolean limitsOnly;
     private final LinearLayout root;
     private final HealthUsageManager manager;
     private HealthModels.HealthSnapshot snapshot;
@@ -63,6 +64,10 @@ public final class HealthUsageView extends ScrollView {
     private final ExecutorService packageExecutor = Executors.newSingleThreadExecutor();
     private boolean appLimitUsageReady;
     private float pullStartY=-1f;
+    private float swipeStartX=-1f;
+    private float dispatchStartX=-1f;
+    private float dispatchStartY=-1f;
+    private boolean swipeOpened;
     private final Runnable firstFrameGate = () -> {
         if (!isAttachedToWindow() || getVisibility() != View.VISIBLE) return;
         if (!firstFrameReady) scrollTo(0,0);
@@ -74,24 +79,55 @@ public final class HealthUsageView extends ScrollView {
     };
 
     public HealthUsageView(Activity activity){
+        this(activity,false);
+    }
+    public HealthUsageView(Activity activity,boolean limitsOnly){
         super(activity);
         this.activity=activity;
+        this.limitsOnly=limitsOnly;
         manager=new HealthUsageManager(activity);
         setFillViewport(true);setClipToPadding(true);setBackgroundColor(SURFACE);
         root=column();root.setPadding(dp(20),dp(16),dp(20),dp(26));root.setBackgroundColor(SURFACE);
         addView(root,new ScrollView.LayoutParams(-1,-2));
         setOnTouchListener((view,event)->{
-            if(event.getAction()==MotionEvent.ACTION_DOWN)pullStartY=getScrollY()==0?event.getY():-1f;
+            if(event.getAction()==MotionEvent.ACTION_DOWN){
+                pullStartY=getScrollY()==0?event.getY():-1f;
+                swipeStartX=event.getX();
+            }
             else if(event.getAction()==MotionEvent.ACTION_UP){
-                if(pullStartY>=0f&&event.getY()-pullStartY>=dp(90)&&!loading)refreshData();
+                float dx=event.getX()-swipeStartX;
+                float dy=event.getY()-pullStartY;
+                if(pullStartY>=0f&&dy>=dp(90)&&!loading) refreshData();
                 pullStartY=-1f;
-            }else if(event.getAction()==MotionEvent.ACTION_CANCEL)pullStartY=-1f;
+                swipeStartX=-1f;
+            }else if(event.getAction()==MotionEvent.ACTION_CANCEL){pullStartY=-1f;swipeStartX=-1f;}
             return false;
         });
         buildInteractivePage();
     }
 
     public boolean hasLoaded(){return loaded;}
+
+    @Override public boolean dispatchTouchEvent(MotionEvent event) {
+        if (event.getAction() == MotionEvent.ACTION_DOWN) {
+            dispatchStartX = event.getX();
+            dispatchStartY = event.getY();
+            swipeOpened = false;
+        } else if (event.getAction() == MotionEvent.ACTION_UP && dispatchStartX >= 0f) {
+            float dx = event.getX() - dispatchStartX;
+            float dy = event.getY() - dispatchStartY;
+            if (!limitsOnly && !swipeOpened && dx >= dp(140) && Math.abs(dx) > Math.abs(dy) * 1.2f) {
+                swipeOpened = true;
+                activity.startActivity(new Intent(activity, UsageDebugActivity.class));
+            }
+            dispatchStartX = -1f;
+            dispatchStartY = -1f;
+        } else if (event.getAction() == MotionEvent.ACTION_CANCEL) {
+            dispatchStartX = -1f;
+            dispatchStartY = -1f;
+        }
+        return super.dispatchTouchEvent(event);
+    }
 
     @Override protected void onAttachedToWindow(){
         super.onAttachedToWindow();
@@ -177,6 +213,7 @@ public final class HealthUsageView extends ScrollView {
     /** Build the interactive shell once; later snapshots only update its data views. */
     private void buildInteractivePage(){
         root.removeAllViews();
+        if(limitsOnly){addAppLimitCard(false);pageBuilt=true;return;}
         addHeader(true);
 
         LinearLayout today=card();today.setBackground(round(Color.rgb(233,243,236),22));
@@ -205,6 +242,7 @@ public final class HealthUsageView extends ScrollView {
 
     private void showLoading(){
         if(!pageBuilt)buildInteractivePage();
+        if(limitsOnly){updateAppLimitUsage(false);return;}
         todayTotalView.setText("正在读取");
         todayComparisonView.setText("正在整理使用数据");
         updateGoal(0L);
@@ -247,6 +285,11 @@ public final class HealthUsageView extends ScrollView {
     private void updateSnapshot(HealthModels.HealthSnapshot value){
         if(!pageBuilt)buildInteractivePage();
         if(value==null||value.today==null){showLoading();return;}
+        if(limitsOnly){
+            latestAppUsage.clear();
+            for(HealthModels.AppUsage app:value.today.apps) latestAppUsage.put(app.packageName,app.usageMillis);
+            renderAppLimitRows(true);return;
+        }
         long used=value.today.totalUsageMillis;
         todayTotalView.setText(value.hasData?duration(used):"0分钟");
         if(value.yesterday!=null){
@@ -270,6 +313,10 @@ public final class HealthUsageView extends ScrollView {
         titleColumn.addView(text("看见习惯，给注意力留一点空间",13,MUTED,false));
         header.addView(titleColumn,new LinearLayout.LayoutParams(0,-2,1));
         if(canRefresh){
+            Button compare=button("统计对照",Color.rgb(229,241,232),GREEN);compare.setTextSize(11);
+            compare.setOnClickListener(v->activity.startActivity(new Intent(activity,UsageDebugActivity.class)));
+            LinearLayout.LayoutParams compareParams=new LinearLayout.LayoutParams(dp(82),dp(42));
+            compareParams.setMargins(0,0,dp(6),0);header.addView(compare,compareParams);
             Button refresh=button("刷新",Color.rgb(229,241,232),GREEN);refresh.setTextSize(12);
             refresh.setOnClickListener(v->refreshData());header.addView(refresh,new LinearLayout.LayoutParams(dp(72),dp(42)));
         }

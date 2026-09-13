@@ -116,33 +116,37 @@ public final class UsageStatsRepository {
             lastUsageStatsQueryAvailable = usageStatsManager != null;
             return Collections.emptyList();
         }
+
+        // Match the phone's Screen Time implementation: read the daily
+        // UsageStats buckets for the requested calendar range first.  On some
+        // Xiaomi builds the aggregate API reports a different total than the
+        // daily buckets used by the system UI.
         List<UsageStats> raw = null;
-        String source = "aggregate";
-        // App duration is defined by the system aggregate API. This is the
-        // single primary source for both today and historical days.
+        String source = "daily";
         try {
-            Map<String, UsageStats> aggregate = usageStatsManager
-                .queryAndAggregateUsageStats(beginMillis, endMillis);
-            if (aggregate != null && !aggregate.isEmpty()) {
-                raw = new ArrayList<UsageStats>(aggregate.values());
-            }
+            raw = usageStatsManager.queryUsageStats(
+                UsageStatsManager.INTERVAL_DAILY, beginMillis, endMillis);
         } catch (RuntimeException error) {
             lastQueryError = error.getClass().getSimpleName();
-            Log.w(TAG, "queryAndAggregateUsageStats failed", error);
+            Log.w(TAG, "queryUsageStats failed", error);
         }
-        // Keep a narrowly-scoped compatibility fallback only when the primary
-        // aggregate API is unavailable or empty. It never replaces a non-empty
-        // aggregate result.
+
+        // Compatibility fallback only when the daily API itself fails or is
+        // unavailable. Never replace a non-empty daily result with aggregate.
         if (raw == null || raw.isEmpty()) {
-            source = "daily-fallback";
+            source = "aggregate-fallback";
             try {
-                raw = usageStatsManager.queryUsageStats(
-                    UsageStatsManager.INTERVAL_DAILY, beginMillis, endMillis);
+                Map<String, UsageStats> aggregate = usageStatsManager
+                    .queryAndAggregateUsageStats(beginMillis, endMillis);
+                if (aggregate != null && !aggregate.isEmpty()) {
+                    raw = new ArrayList<UsageStats>(aggregate.values());
+                }
             } catch (RuntimeException error) {
                 lastQueryError = error.getClass().getSimpleName();
-                Log.w(TAG, "queryUsageStats failed", error);
+                Log.w(TAG, "queryAndAggregateUsageStats failed", error);
             }
         }
+
         Map<String, HealthModels.AppUsageStatRecord> merged =
             new HashMap<String, HealthModels.AppUsageStatRecord>();
         if (raw != null) {
@@ -176,7 +180,6 @@ public final class UsageStatsRepository {
             + " source=" + source + " records=" + result.size());
         return result;
     }
-
     /** Debug-only A/B sample: raw aggregate UsageStats durations. */
     public Map<String, Long> queryAggregateDurationsForDebug(long beginMillis, long endMillis) {
         Map<String, Long> result = new HashMap<String, Long>();
@@ -324,7 +327,7 @@ public final class UsageStatsRepository {
 
     private static boolean isRelevantEventType(int type) {
         return type == 1 || type == 2 || type == 15 || type == 16 || type == 17 || type == 18
-            || type == 21 || type == 22 || type == 23 || type == 26 || type == 27;
+            || type == 19 || type == 20 || type == 21 || type == 22 || type == 23 || type == 26 || type == 27;
     }
 
     /** Packages which represent the shell/system plumbing, not user apps. */

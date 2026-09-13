@@ -15,6 +15,9 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.text.SimpleDateFormat;
+import java.util.Date;
+import java.util.Locale;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
@@ -165,188 +168,34 @@ public final class HealthUsageManager {
 
     private HealthModels.HealthSnapshot buildSnapshot(long nowMillis) {
         if (!hasUsageAccess()) throw new PermissionDeniedException();
-
-        List<Long> dayStarts = dayStarts(nowMillis, SNAPSHOT_DAYS);
-        Calendar lookback = Calendar.getInstance();
-        lookback.setTimeInMillis(dayStarts.get(0));
-        lookback.add(Calendar.DAY_OF_MONTH, -1);
-        List<HealthModels.UsageEventRecord> events = repository.queryEventRecords(
-            lookback.getTimeInMillis(), nowMillis);
-        boolean eventsAvailable = repository.wasLastEventQueryAvailable();
-
-        List<List<HealthModels.AppUsageStatRecord>> statsByDay =
-            new ArrayList<List<HealthModels.AppUsageStatRecord>>(SNAPSHOT_DAYS);
-        List<Boolean> statsAvailabilityByDay =
-            new ArrayList<Boolean>(SNAPSHOT_DAYS);
-        Set<String> packageNames = new HashSet<String>();
-        for (int index = 0; index < dayStarts.size(); index++) {
-            long start = dayStarts.get(index);
-            long end = index + 1 < dayStarts.size() ? dayStarts.get(index + 1) : nowMillis;
-            List<HealthModels.AppUsageStatRecord> stats =
-                repository.queryUsageStatsRecords(start, end);
-            statsByDay.add(stats);
-            statsAvailabilityByDay.add(repository.wasLastUsageStatsQueryAvailable());
-            for (HealthModels.AppUsageStatRecord stat : stats) {
-                if (stat != null && stat.packageName.length() > 0) {
-                    packageNames.add(stat.packageName);
+        List<HealthModels.DayUsage> days=new ArrayList<>();
+        java.time.ZoneId zone=java.time.ZoneId.systemDefault();
+        java.time.LocalDate todayDate=java.time.Instant.ofEpochMilli(nowMillis).atZone(zone).toLocalDate();
+        try(com.eyerest.app.ledger.UsageRepository ledger=new com.eyerest.app.ledger.UsageRepository(context)) {
+            ledger.archiveRecent();
+            for(int i=SNAPSHOT_DAYS-1;i>=0;i--){
+                java.time.LocalDate date=todayDate.minusDays(i);
+                com.eyerest.app.ledger.UsageEngine.Day day=ledger.load(date);
+                List<HealthModels.AppUsage> apps=new ArrayList<>();
+                int opens=0;
+                for(com.eyerest.app.ledger.UsageEngine.App app:day.sorted()){
+                    HealthModels.AppMetadata info=repository.getAppMetadata(app.pkg);
+                    apps.add(new HealthModels.AppUsage(app.pkg,info.appName,app.millis,app.opens,
+                        day.evidence,info.installed,true,0L));
+                    opens+=app.opens;
                 }
+                long start=date.atStartOfDay(zone).toInstant().toEpochMilli();
+                long end=Math.min(nowMillis,date.plusDays(1).atStartOfDay(zone).toInstant().toEpochMilli());
+                days.add(new HealthModels.DayUsage(start,end,day.total,0,0,0,0,opens,
+                    day.evidence,false,day.evidence||day.total>0,apps));
             }
-        }
-        for (HealthModels.UsageEventRecord event : events) {
-            if (event != null && event.packageName.length() > 0
-                && (event.isForeground() || event.isBackground())) {
-                packageNames.add(event.packageName);
-            }
-        }
-        Map<String, HealthModels.AppMetadata> metadata = loadMetadata(packageNames);
-
-        List<HealthModels.DayUsage> days =
-            new ArrayList<HealthModels.DayUsage>(SNAPSHOT_DAYS);
-        for (int index = 0; index < dayStarts.size(); index++) {
-            long start = dayStarts.get(index);
-            long end = index + 1 < dayStarts.size() ? dayStarts.get(index + 1) : nowMillis;
-            days.add(calculator.calculateDay(start, end, statsByDay.get(index),
-                events, metadata, statsAvailabilityByDay.get(index), eventsAvailable,
-                false));
-        }
-        if (!hasUsageAccess()) throw new PermissionDeniedException("Usage access was revoked");
-
-        HealthModels.DayUsage today = days.get(days.size() - 1);
-        HealthModels.DayUsage yesterday = days.get(days.size() - 2);
-        logDurationDiagnostics(today, events, dayStarts.get(dayStarts.size() - 1),
-            nowMillis, metadata);
-        List<HealthModels.DayUsage> previous7 = immutableSlice(days, 0, 7);
-        List<HealthModels.DayUsage> last7 = immutableSlice(days, 7, 14);
-        List<HealthModels.AppUsage> topApps = removeOwnApp(
-            calculator.topApps(today, TOP_APP_COUNT + 1), TOP_APP_COUNT);
-        HealthModels.HealthScore score = scoreCalculator.calculate(today,
-            settings.getDailyGoalMillis(), settings.getContinuousReminderMillis());
-        return new HealthModels.HealthSnapshot(today, yesterday, last7, previous7,
-            topApps, score, nowMillis, today.hasUsageData);
-    }
-
-    /** Development diagnostic: prove the displayed duration is UsageStats-backed. */
-    private void logDurationDiagnostics(HealthModels.DayUsage today,
-                                         List<HealthModels.UsageEventRecord> events,
-                                         long dayStartMillis, long nowMillis,
-                                         Map<String, HealthModels.AppMetadata> metadata) {
-        if (today == null || today.apps == null) return;
-        Map<String, Long> aggregate = repository.queryAggregateDurationsForDebug(
-            dayStartMillis, nowMillis);
-        Map<String, Long> daily = repository.queryDailyDurationsForDebug(
-            dayStartMillis, nowMillis);
-        Map<String, Long> eventDurations = new HashMap<String, Long>();
-        for (HealthModels.UsageInterval interval : calculator.buildIntervals(
-                events, dayStartMillis, nowMillis)) {
-            long start = Math.max(dayStartMillis, interval.startMillis);
-            long end = Math.min(nowMillis, interval.endMillis);
-            if (end <= start) continue;
-            Long old = eventDurations.get(interval.packageName);
-            eventDurations.put(interval.packageName,
-                (old == null ? 0L : old) + (end - start));
-        }
-        Map<String, Long> finalDurations = new HashMap<String, Long>();
-        for (HealthModels.AppUsage app : today.apps) {
-            if (app != null) finalDurations.put(app.packageName, app.usageMillis);
-        }
-        Set<String> packages = new HashSet<String>();
-        packages.addAll(aggregate.keySet());
-        packages.addAll(daily.keySet());
-        packages.addAll(finalDurations.keySet());
-        long screenInteractiveMillis = screenInteractiveDuration(events, dayStartMillis, nowMillis);
-        for (String packageName : packages) {
-            if (packageName == null || packageName.length() == 0) continue;
-            long aggregateDuration = value(aggregate, packageName);
-            long dailyBucketDuration = value(daily, packageName);
-            long eventDuration = eventDurations.containsKey(packageName)
-                ? eventDurations.get(packageName) : 0L;
-            long finalDuration = value(finalDurations, packageName);
-            HealthModels.AppMetadata info = metadata == null ? null : metadata.get(packageName);
-            if (info != null && (!info.installed || !info.userFacing)) continue;
-            if (aggregateDuration <= 0L && dailyBucketDuration <= 0L && eventDuration <= 0L) continue;
-            Log.d(TAG, "packageName=" + packageName
-                + ",appName=" + (info == null ? packageName : info.appName)
-                + ",UsageStats duration=" + aggregateDuration
-                + ",aggregateDuration=" + aggregateDuration
-                + ",dailyBucketDuration=" + dailyBucketDuration
-                + ",eventDuration=" + eventDuration
-                + ",screenInteractiveTime=" + screenInteractiveMillis
-                + ",final duration=" + finalDuration
-                + ",finalDuration=" + finalDuration
-                + ",finalEqualsAggregate=" + (finalDuration == aggregateDuration)
-                + ",finalEqualsUsageStats=" + (finalDuration == aggregateDuration)
-                + ",source=UsageStats");
-        }
-    }
-
-    private static long value(Map<String, Long> values, String key) {
-        Long result = values == null ? null : values.get(key);
-        return result == null ? 0L : Math.max(0L, result);
-    }
-
-    /** Debug-only screen activity total; never feeds App duration or UI data. */
-    private static long screenInteractiveDuration(List<HealthModels.UsageEventRecord> events,
-                                                  long start, long end) {
-        if (events == null || end <= start) return 0L;
-        boolean active = false;
-        long activeStart = 0L;
-        long total = 0L;
-        for (HealthModels.UsageEventRecord event : events) {
-            if (event == null || event.timestampMillis > end) break;
-            if (event.eventType == HealthModels.UsageEventRecord.TYPE_SCREEN_INTERACTIVE) {
-                if (!active) { active = true; activeStart = Math.max(start, event.timestampMillis); }
-            } else if (event.eventType == HealthModels.UsageEventRecord.TYPE_SCREEN_NON_INTERACTIVE
-                && active) {
-                total = saturatingAdd(total, Math.max(0L,
-                    Math.min(end, event.timestampMillis) - activeStart));
-                active = false;
-            }
-        }
-        if (active) total = saturatingAdd(total, Math.max(0L, end - activeStart));
-        return Math.min(Math.max(0L, end - start), total);
-    }
-
-    private Map<String, HealthModels.AppMetadata> loadMetadata(Set<String> packageNames) {
-        Map<String, HealthModels.AppMetadata> result =
-            new HashMap<String, HealthModels.AppMetadata>();
-        for (String packageName : packageNames) {
-            if (packageName != null && packageName.length() > 0) {
-                result.put(packageName, repository.getAppMetadata(packageName));
-            }
-        }
-        return result;
-    }
-
-    private List<HealthModels.AppUsage> removeOwnApp(List<HealthModels.AppUsage> apps, int limit) {
-        if (apps == null || apps.isEmpty()) return Collections.emptyList();
-        List<HealthModels.AppUsage> result = new ArrayList<HealthModels.AppUsage>();
-        for (HealthModels.AppUsage app : apps) {
-            if (app == null || context.getPackageName().equals(app.packageName)) continue;
-            result.add(app);
-            if (result.size() >= limit) break;
-        }
-        return result;
-    }
-
-    private static List<Long> dayStarts(long nowMillis, int count) {
-        Calendar today = Calendar.getInstance();
-        today.setTimeInMillis(nowMillis);
-        today.set(Calendar.HOUR_OF_DAY, 0);
-        today.set(Calendar.MINUTE, 0);
-        today.set(Calendar.SECOND, 0);
-        today.set(Calendar.MILLISECOND, 0);
-        List<Long> result = new ArrayList<Long>(count);
-        for (int offset = count - 1; offset >= 0; offset--) {
-            Calendar day = (Calendar) today.clone();
-            day.add(Calendar.DAY_OF_MONTH, -offset);
-            result.add(day.getTimeInMillis());
-        }
-        return result;
-    }
-
-    private static long saturatingAdd(long left, long right) {
-        if (right > 0L && left > Long.MAX_VALUE - right) return Long.MAX_VALUE;
-        return left + right;
+        } catch(SecurityException e){throw new PermissionDeniedException();}
+          catch(Exception e){throw new IllegalStateException("ScreenLedger statistics unavailable",e);}
+        HealthModels.DayUsage today=days.get(days.size()-1), yesterday=days.get(days.size()-2);
+        return new HealthModels.HealthSnapshot(today,yesterday,immutableSlice(days,7,14),
+            immutableSlice(days,0,7),new ArrayList<>(today.apps.subList(0,Math.min(TOP_APP_COUNT,today.apps.size()))),
+            scoreCalculator.calculate(today,settings.getDailyGoalMillis(),settings.getContinuousReminderMillis()),
+            nowMillis,today.hasUsageData);
     }
 
     private static List<HealthModels.DayUsage> immutableSlice(
