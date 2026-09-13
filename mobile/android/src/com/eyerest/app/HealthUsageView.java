@@ -411,9 +411,10 @@ public final class HealthUsageView extends ScrollView {
     }
 
     private void addAppLimitCard(boolean usageReady){
+        addCard(new StrictLimitsPanel(activity));
         LinearLayout panel=card();
         LinearLayout heading=row();
-        heading.addView(text("应用使用限制",18,INK,true),new LinearLayout.LayoutParams(0,-2,1));
+        heading.addView(text("其他应用限制",18,INK,true),new LinearLayout.LayoutParams(0,-2,1));
         Button add=button("添加应用",Color.TRANSPARENT,GREEN); add.setTextSize(12); add.setOnClickListener(v->showAppLimitDialogV2(null)); heading.addView(add,new LinearLayout.LayoutParams(dp(92),dp(40))); panel.addView(heading);
         TextView hint=text("选择某个 App 并设置每日可使用时长，达到上限后会显示限制画面。",13,MUTED,false); hint.setPadding(0,dp(7),0,dp(8)); panel.addView(hint);
         appLimitList=column();panel.addView(appLimitList);

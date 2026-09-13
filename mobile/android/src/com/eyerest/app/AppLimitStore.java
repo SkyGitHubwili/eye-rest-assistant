@@ -21,10 +21,14 @@ public final class AppLimitStore {
             try { result.add(new AppLimit(parts[0], Long.parseLong(parts[1]) * 60000L, "1".equals(parts[2]), 0, true)); }
             catch (RuntimeException ignored) {}
         }
+        result.removeIf(v->GameRegistry.protectedPackage(context,v.packageName));
         return result;
     }
 
     public static void upsert(Context context, AppLimit value) {
+        if(GameRegistry.protectedPackage(context,value.packageName)){
+            android.widget.Toast.makeText(context,"此应用执行固定规则，不能修改额度",android.widget.Toast.LENGTH_LONG).show();return;
+        }
         List<AppLimit> values = get(context); boolean replaced = false;
         for (int i = 0; i < values.size(); i++) if (values.get(i).packageName.equals(value.packageName)) { values.set(i, value); replaced = true; break; }
         if (!replaced) values.add(value);
@@ -39,7 +43,7 @@ public final class AppLimitStore {
 
     public static void save(Context context, List<AppLimit> values) {
         StringBuilder out = new StringBuilder();
-        if (values != null) for (AppLimit v : values) if (v != null) {
+        if (values != null) for (AppLimit v : values) if (v != null && !GameRegistry.protectedPackage(context,v.packageName)) {
             if (out.length() > 0) out.append('\n');
             out.append(v.packageName).append('\t').append(v.dailyLimitMillis / 60000L).append('\t').append(v.enabled ? '1' : '0');
         }
@@ -47,7 +51,6 @@ public final class AppLimitStore {
     }
 
     public static boolean hasEnabled(Context context) {
-        for (AppLimit v : get(context)) if (v.enabled && v.dailyLimitMillis > 0) return true;
-        return false;
+        return true; // Personal fixed policy is always enabled.
     }
 }
