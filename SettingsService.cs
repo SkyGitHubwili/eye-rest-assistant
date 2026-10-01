@@ -5,7 +5,8 @@ namespace EyeRest;
 
 public static class SettingsService
 {
-    public static string DataDirectory { get; } = @"F:\护眼助手";
+    public static string DataDirectory { get; } = Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "护眼助手");
     private static string SettingsPath => Path.Combine(DataDirectory, "settings.json");
 
     public static EyeRestSettings Load()

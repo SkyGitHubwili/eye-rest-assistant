@@ -2,7 +2,9 @@
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="护眼休息" WindowStyle="None" ResizeMode="NoResize" Topmost="True" ShowInTaskbar="False"
-        Background="#153B34" WindowStartupLocation="Manual">
+        Background="#153B34" WindowStartupLocation="Manual"
+        UseLayoutRounding="True" SnapsToDevicePixels="True"
+        TextOptions.TextFormattingMode="Display" TextOptions.TextRenderingMode="ClearType">
     <Grid>
         <Border x:Name="Backdrop">
             <Border.Background>
@@ -26,10 +28,14 @@
                 <TextBlock Text="看看远处，放松眼睛" Foreground="White" FontFamily="Microsoft YaHei UI" FontSize="44" FontWeight="SemiBold" HorizontalAlignment="Center">
                     <TextBlock.Effect><DropShadowEffect BlurRadius="14" Opacity="0.3"/></TextBlock.Effect>
                 </TextBlock>
-                <TextBlock Text="缓慢眨眼 · 放松肩颈 · 深呼吸" Margin="0,18,0,34" Foreground="#E8FFFFFF" FontFamily="Microsoft YaHei UI" FontSize="18" HorizontalAlignment="Center"/>
-                <Border Width="112" Height="112" Background="#36FFFFFF" CornerRadius="56">
+                <TextBlock Text="缓慢眨眼 · 放松肩颈 · 深呼吸" Margin="0,18,0,40" Foreground="#E8FFFFFF" FontFamily="Microsoft YaHei UI" FontSize="18" HorizontalAlignment="Center"/>
+                <Grid>
+                    <Border Width="112" Height="112" Background="#36FFFFFF" CornerRadius="56"/>
                     <TextBlock x:Name="BreakCountdownText" Text="20" Foreground="White" FontFamily="Segoe UI Variable Display" FontSize="48" FontWeight="SemiBold" HorizontalAlignment="Center" VerticalAlignment="Center"/>
-                </Border>
+                    <!-- 倒计时圆两侧装饰（避开上方副标题，不拦截鼠标） -->
+                    <Image Source="{StaticResource Sparkle}" Width="22" Margin="88,-12,0,0" IsHitTestVisible="False" Opacity="0.9"/>
+                    <Image Source="{StaticResource SakuraPink}" Width="24" Margin="-90,34,0,0" IsHitTestVisible="False" Opacity="0.7"/>
+                </Grid>
             </StackPanel>
             <Button x:Name="EndButton" Grid.Row="2" Content="提前结束休息" HorizontalAlignment="Center" Foreground="White" Background="#35FFFFFF" BorderBrush="#70FFFFFF" BorderThickness="1" Padding="22,11" FontFamily="Microsoft YaHei UI" FontSize="14" Cursor="Hand" Click="EndButton_Click">
                 <Button.Template>
@@ -40,6 +46,21 @@
                     </ControlTemplate>
                 </Button.Template>
             </Button>
+        </Grid>
+
+        <!-- 动漫花边装饰层：贴四角与边缘空白，不遮文字；不拦截鼠标 -->
+        <Grid IsHitTestVisible="False">
+            <!-- 四角花（贴角，50；内容从 Margin54 开始，不重叠） -->
+            <Image Source="{StaticResource SakuraSoft}" Width="50" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="2,2,0,0" Opacity="0.8"/>
+            <Image Source="{StaticResource SakuraPink}" Width="50" HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,2,2,0" Opacity="0.75"/>
+            <Image Source="{StaticResource SakuraPink}" Width="50" HorizontalAlignment="Left" VerticalAlignment="Bottom" Margin="2,0,0,2" Opacity="0.7"/>
+            <Image Source="{StaticResource SakuraSoft}" Width="50" HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="0,0,2,2" Opacity="0.75"/>
+            <!-- 上边缘点缀（避开左上角标签） -->
+            <Image Source="{StaticResource LeafDeco}" Width="42" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="300,8,0,0" Opacity="0.6"/>
+            <Image Source="{StaticResource Sparkle}" Width="30" HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,16,300,0" Opacity="0.65"/>
+            <!-- 下边缘点缀（避开中央 EndButton） -->
+            <Image Source="{StaticResource Sparkle}" Width="28" HorizontalAlignment="Left" VerticalAlignment="Bottom" Margin="420,0,0,12" Opacity="0.6"/>
+            <Image Source="{StaticResource SakuraPink}" Width="32" HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="0,0,420,10" Opacity="0.6"/>
         </Grid>
     </Grid>
 </Window>
