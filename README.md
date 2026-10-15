@@ -9,6 +9,14 @@ Windows + Android 本地护眼工具；Android 8.0+ 还包含睡眠和健康使�
 - 提前结束休息每月最多 3 次
 - Android 支持关闭、仅当天手动护眼、每日自动护眼三种模式
 
+## Windows 1.6.15
+
+- 点击窗口“×”后隐藏到系统托盘，继续计时和休息提醒。
+- 双击托盘图标，或右键选择“打开护眼助手”，恢复窗口；右键选择“退出护眼助手”彻底退出。
+- 开机自启直接进入托盘；隐藏期间的休息结束后继续保持隐藏。
+- 改用软件渲染并限制图片解码尺寸，改善双显卡、远程显示器及大图片场景的显示稳定性。
+- 设置保存在 `%LocalAppData%\护眼助手`，兼容迁移原有设置。Windows 安装包请下载 [Windows 1.6.15](https://github.com/SkyGitHubwili/eye-rest-assistant/releases/tag/windows-v1.6.15)。
+
 ## Android 3.2.7
 
 - 使用概览采用 ScreenLedger 事件统计核心，按应用前后台、熄屏及锁屏事件计时，归档保存在本机 SQLite。

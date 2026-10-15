@@ -1,9 +1,9 @@
 using Microsoft.Win32;
+using System.ComponentModel;
 using System.IO;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
-using System.Windows.Media.Imaging;
 using System.Windows.Threading;
 using WinForms = System.Windows.Forms;
 using Color = System.Windows.Media.Color;
@@ -22,11 +22,16 @@ public partial class MainWindow : Window
     private bool running;
     private bool loading = true;
     private bool schedulePaused;
+    private bool hiddenToTray;
+    private bool allowExit;
+    private WinForms.NotifyIcon? trayIcon;
+    private System.Drawing.Icon? trayImage;
     private readonly List<BreakWindow> breakWindows = [];
 
     public MainWindow()
     {
         InitializeComponent();
+        InitializeTrayIcon();
         settings = SettingsService.Load();
         for (var hour = 0; hour < 24; hour++)
         {
@@ -40,7 +45,7 @@ public partial class MainWindow : Window
         StartWithWindowsCheck.IsChecked = settings.StartWithWindows;
         ScheduleEnabledCheck.IsChecked = settings.ScheduleEnabled;
         SchedulePanel.IsEnabled = settings.ScheduleEnabled;
-        ApplyPreview();
+        try { ApplyPreview(); } catch { }
         ResetCountdown();
         timer.Tick += Timer_Tick;
         scheduleTimer.Tick += (_, _) => ApplyScheduleState();
@@ -51,7 +56,85 @@ public partial class MainWindow : Window
         else if (!IsWithinActiveHours()) { schedulePaused = settings.StartAutomatically; EnterSleepState(); }
         else PauseTimer();
         if (Environment.GetCommandLineArgs().Any(x => x.Equals("--autostart", StringComparison.OrdinalIgnoreCase)))
-            WindowState = WindowState.Minimized;
+            Loaded += (_, _) => HideToTray();
+    }
+
+    private void InitializeTrayIcon()
+    {
+        using var iconStream = typeof(MainWindow).Assembly.GetManifestResourceStream("EyeRest.TrayIcon")
+            ?? throw new InvalidOperationException("无法加载托盘图标");
+        using var icon = new System.Drawing.Icon(iconStream);
+        trayImage = (System.Drawing.Icon)icon.Clone();
+        var menu = new WinForms.ContextMenuStrip();
+        menu.Items.Add("打开护眼助手", null, (_, _) => Dispatcher.Invoke(RestoreFromTray));
+        menu.Items.Add(new WinForms.ToolStripSeparator());
+        menu.Items.Add("退出护眼助手", null, (_, _) => Dispatcher.Invoke(ExitApplication));
+        trayIcon = new WinForms.NotifyIcon
+        {
+            Icon = trayImage,
+            Text = "护眼助手 · 双击打开，右键退出",
+            ContextMenuStrip = menu,
+            Visible = true
+        };
+        trayIcon.DoubleClick += (_, _) => Dispatcher.Invoke(RestoreFromTray);
+    }
+
+    private void HideToTray()
+    {
+        hiddenToTray = true;
+        Hide();
+        ShowInTaskbar = false;
+    }
+
+    private void RestoreFromTray()
+    {
+        hiddenToTray = false;
+        if (breakWindows.Count > 0)
+        {
+            foreach (var window in breakWindows) window.Activate();
+            return;
+        }
+        ShowInTaskbar = true;
+        Show();
+        if (WindowState == WindowState.Minimized) WindowState = WindowState.Normal;
+        Activate();
+    }
+
+    private void ExitApplication()
+    {
+        allowExit = true;
+        System.Windows.Application.Current.Shutdown();
+    }
+
+    internal void PrepareForSystemShutdown() => allowExit = true;
+
+    protected override void OnClosing(CancelEventArgs e)
+    {
+        base.OnClosing(e);
+        if (allowExit) return;
+        e.Cancel = true;
+        HideToTray();
+    }
+
+    protected override void OnClosed(EventArgs e)
+    {
+        timer.Stop();
+        scheduleTimer.Stop();
+        foreach (var window in breakWindows.ToArray())
+        {
+            window.RequestEnd -= EndBreak;
+            window.RequestEarlyEnd -= EndBreakEarly;
+            window.CloseFromController();
+        }
+        breakWindows.Clear();
+        if (trayIcon is not null)
+        {
+            trayIcon.Visible = false;
+            trayIcon.ContextMenuStrip?.Dispose();
+            trayIcon.Dispose();
+        }
+        trayImage?.Dispose();
+        base.OnClosed(e);
     }
 
     private static void SelectByTag(System.Windows.Controls.ComboBox box, int value)
@@ -155,21 +238,44 @@ public partial class MainWindow : Window
         NormalizeEarlyEndUsage();
         var earlyEndRemaining = Math.Max(0, 3 - settings.EarlyEndCount);
         Hide();
-        foreach (var screen in WinForms.Screen.AllScreens)
+        try
         {
-            var window = new BreakWindow(
-                settings.BreakSeconds,
-                settings.ImagePath,
-                screen.Primary,
-                earlyEndRemaining,
-                screen.Bounds.X,
-                screen.Bounds.Y,
-                screen.Bounds.Width,
-                screen.Bounds.Height);
-            window.RequestEnd += EndBreak;
-            window.RequestEarlyEnd += EndBreakEarly;
-            breakWindows.Add(window);
-            window.Show();
+            foreach (var screen in WinForms.Screen.AllScreens)
+            {
+                var window = new BreakWindow(
+                    settings.BreakSeconds,
+                    settings.ImagePath,
+                    screen.Primary,
+                    earlyEndRemaining,
+                    screen.Bounds.X,
+                    screen.Bounds.Y,
+                    screen.Bounds.Width,
+                    screen.Bounds.Height);
+                window.RequestEnd += EndBreak;
+                window.RequestEarlyEnd += EndBreakEarly;
+                breakWindows.Add(window);
+                window.Show();
+            }
+        }
+        catch (Exception ex)
+        {
+            foreach (var window in breakWindows.ToArray())
+            {
+                window.RequestEnd -= EndBreak;
+                window.RequestEarlyEnd -= EndBreakEarly;
+                try { window.CloseFromController(); } catch { }
+            }
+            breakWindows.Clear();
+            if (!hiddenToTray) RestoreFromTray();
+            ResetCountdown();
+            if (IsWithinActiveHours()) StartTimer(); else EnterSleepState();
+            MessageBox.Show(
+                ex is OutOfMemoryException
+                    ? "休息画面无法显示。已改用软件渲染，请关闭后重新打开护眼助手。"
+                    : $"休息画面无法显示：{ex.Message}",
+                "护眼助手",
+                MessageBoxButton.OK,
+                MessageBoxImage.Warning);
         }
     }
 
@@ -182,8 +288,7 @@ public partial class MainWindow : Window
             window.CloseFromController();
         }
         breakWindows.Clear();
-        Show();
-        Activate();
+        if (!hiddenToTray) RestoreFromTray();
         ResetCountdown();
         if (IsWithinActiveHours()) StartTimer(); else EnterSleepState();
     }
@@ -279,24 +384,21 @@ public partial class MainWindow : Window
 
     private void ApplyPreview()
     {
-        if (!string.IsNullOrWhiteSpace(settings.ImagePath) && File.Exists(settings.ImagePath))
+        var image = ImageLoader.TryLoad(settings.ImagePath, 960);
+        if (image is not null)
         {
-            var bitmap = new BitmapImage();
-            bitmap.BeginInit();
-            bitmap.CacheOption = BitmapCacheOption.OnLoad;
-            bitmap.UriSource = new Uri(settings.ImagePath, UriKind.Absolute);
-            bitmap.EndInit();
-            PreviewBackground.Background = new ImageBrush(bitmap) { Stretch = Stretch.UniformToFill };
+            PreviewBackground.Background = new ImageBrush(image) { Stretch = Stretch.UniformToFill };
             PreviewHint.Visibility = Visibility.Collapsed;
             ImageStatusText.Text = Path.GetFileName(settings.ImagePath);
+            return;
         }
-        else
-        {
-            PreviewBackground.Background = new LinearGradientBrush(
-                new GradientStopCollection { new(Color.FromRgb(23, 60, 53), 0), new(Color.FromRgb(91, 155, 115), .55), new(Color.FromRgb(210, 182, 124), 1) },
-                new Point(0, 0), new Point(1, 1));
-            PreviewHint.Visibility = Visibility.Visible;
-            ImageStatusText.Text = "自然渐变背景";
-        }
+
+        PreviewBackground.Background = new LinearGradientBrush(
+            new GradientStopCollection { new(Color.FromRgb(23, 60, 53), 0), new(Color.FromRgb(91, 155, 115), .55), new(Color.FromRgb(210, 182, 124), 1) },
+            new Point(0, 0), new Point(1, 1));
+        PreviewHint.Visibility = Visibility.Visible;
+        ImageStatusText.Text = string.IsNullOrWhiteSpace(settings.ImagePath) || !File.Exists(settings.ImagePath)
+            ? "自然渐变背景"
+            : "图片无法加载，已改用渐变背景";
     }
 }

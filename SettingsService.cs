@@ -6,7 +6,15 @@ namespace EyeRest;
 public static class SettingsService
 {
     public static string DataDirectory { get; } = Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "护眼助手");
+        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+        "护眼助手");
+
+    private static readonly string[] LegacyDirectories =
+    [
+        @"F:\护眼助手",
+        @"D:\Software\护眼助手",
+    ];
+
     private static string SettingsPath => Path.Combine(DataDirectory, "settings.json");
 
     public static EyeRestSettings Load()
@@ -14,8 +22,17 @@ public static class SettingsService
         try
         {
             Directory.CreateDirectory(DataDirectory);
-            if (File.Exists(SettingsPath))
-                return JsonSerializer.Deserialize<EyeRestSettings>(File.ReadAllText(SettingsPath)) ?? new();
+            foreach (var path in CandidateSettingsPaths())
+            {
+                if (!File.Exists(path)) continue;
+                var loaded = JsonSerializer.Deserialize<EyeRestSettings>(File.ReadAllText(path));
+                if (loaded is null) continue;
+                if (!string.Equals(path, SettingsPath, StringComparison.OrdinalIgnoreCase))
+                {
+                    try { Save(loaded); } catch { }
+                }
+                return loaded;
+            }
         }
         catch
         {
@@ -28,5 +45,12 @@ public static class SettingsService
     {
         Directory.CreateDirectory(DataDirectory);
         File.WriteAllText(SettingsPath, JsonSerializer.Serialize(settings, new JsonSerializerOptions { WriteIndented = true }));
+    }
+
+    private static IEnumerable<string> CandidateSettingsPaths()
+    {
+        yield return SettingsPath;
+        foreach (var directory in LegacyDirectories)
+            yield return Path.Combine(directory, "settings.json");
     }
 }

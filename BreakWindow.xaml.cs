@@ -1,10 +1,8 @@
-using System.IO;
-using System.Runtime.InteropServices;
 using System.ComponentModel;
+using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Interop;
 using System.Windows.Media;
-using System.Windows.Media.Imaging;
 using System.Windows.Threading;
 
 namespace EyeRest;
@@ -37,15 +35,9 @@ public partial class BreakWindow : Window
             ? $"提前结束休息（本月剩余 {earlyEndRemaining} 次）"
             : "本月提前结束机会已用完";
 
-        if (!string.IsNullOrWhiteSpace(imagePath) && File.Exists(imagePath))
-        {
-            var bitmap = new BitmapImage();
-            bitmap.BeginInit();
-            bitmap.CacheOption = BitmapCacheOption.OnLoad;
-            bitmap.UriSource = new Uri(imagePath, UriKind.Absolute);
-            bitmap.EndInit();
-            Backdrop.Background = new ImageBrush(bitmap) { Stretch = Stretch.UniformToFill };
-        }
+        var image = ImageLoader.TryLoad(imagePath, Math.Max(width, 1280));
+        if (image is not null)
+            Backdrop.Background = new ImageBrush(image) { Stretch = Stretch.UniformToFill };
 
         timer.Tick += Timer_Tick;
         Loaded += (_, _) =>
